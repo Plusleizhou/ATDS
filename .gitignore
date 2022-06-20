@@ -10,8 +10,16 @@ __pycache__/
 .idea
 .vscode
 
+# results
+results/log-*
+
+# weights
+*.pth
+
 # data
-data/
+data/features/
+data/processed/
+data/snip_bag/
 
 # Distribution / packaging
 .Python

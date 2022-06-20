@@ -37,6 +37,10 @@ def get_args():
                         default="./data/features/",
                         type=str,
                         help="Path where the computed features are saved")
+    parser.add_argument("-m", "--mode",
+                        required=True,
+                        type=str,
+                        help="train/val/test")
     parser.add_argument("--plus",
                         default=False,
                         action="store_true",
@@ -117,7 +121,6 @@ class PlusPreproc(object):
         }
 
     def store_file(self, pd_obs, pb_lanes, bag_path):
-        # todo: fix the issue
         sample_loop = tqdm(range(0, pd_obs["FRAMES"].unique().max() - self.args.pred_len - self.args.obs_len + 1),
                            desc="Processing",
                            total=pd_obs["FRAMES"].unique().max() - self.args.pred_len - self.args.obs_len + 1,
@@ -152,11 +155,17 @@ class PlusPreproc(object):
                 save_dir = os.path.join(os.getcwd(), "./data/processed/", file_name + "_plus" + ".pkl")
                 if not os.path.exists(save_dir):
                     df.to_pickle(save_dir)
+                continue
+
+            # convert Plus data to Argo data
+            data, headers = self.convertor.process(file_name, df)
 
             if not self.args.debug and self.args.argo:
-                # convert Plus data to Argo data
-                data, headers = self.convertor.process(file_name, df)
-                save_dir = os.path.join(os.getcwd(), self.args.save_dir, file_name + "_argo" + ".pkl")
+                if os.path.abspath(self.args.save_dir):
+                    save_dir = os.path.join(self.args.save_dir, self.args.mode, file_name + "_argo" + ".pkl")
+                else:
+                    save_dir = os.path.join(os.getcwd(),
+                                            self.args.save_dir, self.args.mode, file_name + "_argo" + ".pkl")
                 if not os.path.exists(save_dir):
                     data_df = pd.DataFrame(data, columns=headers)
                     data_df.to_pickle(save_dir)
@@ -276,7 +285,8 @@ class PlusPreproc(object):
             pd_obs = pd.DataFrame(data=obs_list, columns=self.columns)
             pb_lanes = pd.DataFrame(data=lane_list, columns=self.columns)
             pb_lanes = pb_lanes.groupby("FRAMES")
-            self.store_file(pd_obs, pb_lanes, bag_path)
+            if pd_obs.values.shape[0] > 0:
+                self.store_file(pd_obs, pb_lanes, bag_path)
             # exit(0)
 
     @staticmethod
@@ -294,7 +304,7 @@ class PlusPreproc(object):
 
     def plot_scenario(self, scenario, file_name):
         _, ax = plt.subplots(figsize=(10, 10))
-        ax.axis('equal')
+        ax.axis("equal")
         ax.set_title(file_name)
 
         ts = scenario["TIMESTAMP"].unique()
