@@ -11,12 +11,14 @@ from matplotlib import pyplot as plt
 from preprocess import PreProcess
 
 # add lib path
-LIB_PATH = {
-    "ros_path": "/opt/ros/noetic/lib/python3/dist-packages/",
-    "plus_path": os.path.join(os.getcwd(), "lib/python")
-}
-for key in LIB_PATH.keys():
-    sys.path.append(LIB_PATH[key])
+if os.path.exists(os.path.join(os.getcwd(), "lib/python")) \
+        and os.path.exists("/opt/ros/noetic/lib/python3/dist-packages/"):
+    LIB_PATH = {
+        "ros_path": "/opt/ros/noetic/lib/python3/dist-packages/",
+        "plus_path": os.path.join(os.getcwd(), "lib/python")
+    }
+    for key in LIB_PATH.keys():
+        sys.path.append(LIB_PATH[key])
 
 import rosbag
 import fastbag
@@ -143,9 +145,11 @@ class PlusPreproc(object):
             if df_lane.shape[0] > 0:
                 df = pd.concat([df_ob, df_lane], axis=0, copy=False, sort=False)
             else:
-                df = df_ob
-            if df.shape[0] <= 0:
-                return
+                continue
+
+            agent = df[df["OBJECT_TYPE"] == self.det_type["AGENT"]]
+            if agent.shape[0] < self.args.obs_len + self.args.pred_len:
+                continue
 
             file_name = os.path.basename(bag_path).split(".")[0] + "_" + str(observed_frame) + "_" + str(self.ego_id)
             if self.args.debug and self.args.viz:

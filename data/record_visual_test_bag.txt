@@ -1,4 +1,0 @@
-20210820T160934_j7-00004_28_normal_highway_filtered.db
-20210819T160213_j7-00010_32_highway_33_36_filtered.db
-20210820T160934_j7-00004_28_normal_highway_filtered.db
-20210819T160213_j7-00010_32_highway_33_36_filtered.db
