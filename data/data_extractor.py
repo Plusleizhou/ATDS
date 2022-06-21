@@ -141,6 +141,9 @@ class PlusPreproc(object):
 
             if observed_frame in pb_lanes.groups.keys():
                 df_lane = pb_lanes.get_group(observed_frame)
+                lane_cl = df_lane[df_lane["OBJECT_TYPE"] == self.det_type["CENTER_LANE"]]
+                if lane_cl.shape[0] <= 0:
+                    continue
 
             if df_lane.shape[0] > 0:
                 df = pd.concat([df_ob, df_lane], axis=0, copy=False, sort=False)
