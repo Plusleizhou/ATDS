@@ -178,8 +178,16 @@ class PlusPreproc(object):
         with self.open_bag(bag_path) as bag:
             obs_list, lane_list, lane_msg, odom = [], [], None, ()
             obs_num, lane_num, odom_num = -1, 0, 0
+            ts_list = []
             for topic_name, msg_raw, ts in bag.read_messages(topics=self.topics, raw=True):
                 ts = ts.to_sec()
+
+                # remove duplicated data with the same timestamp
+                if len(ts_list) > 0 and min(abs(np.asarray(ts_list) - ts)) < 1e-4:
+                    continue
+                else:
+                    ts_list.append(ts)
+
                 msg = decoder.decode(topic_name, msg_raw[1])
 
                 if topic_name == "/prediction/obstacles":
