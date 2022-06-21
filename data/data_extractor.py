@@ -3,10 +3,13 @@ import errno
 import math
 import os
 import sys
+import time
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from joblib import Parallel, delayed
+import multiprocessing
 from matplotlib import pyplot as plt
 from preprocess import PreProcess
 
@@ -357,28 +360,47 @@ class PlusPreproc(object):
         # plt.show()
 
 
-def main():
-    args = get_args()
+def load_bag_save_features(args, start_idx, batch_size, files):
     data_extractor = PlusPreproc(args)
     msg_decoder = topic_utils.MessageDecoder()
-    for root, _, files in os.walk(args.bag_dir):
-        files_loop = tqdm(enumerate(files), desc="Process", total=len(files), leave=True)
-        for i, file in files_loop:
-            if not file.endswith("db"):
-                print("wrong file extension name")
-                continue
 
-            with open(args.record_file, "rt") as f_reader:
-                records = [x.strip() for x in f_reader.readlines()]
-            if args.mode + "_" + file in records:
-                print("bag_name {} already be extracted".format(file))
-                continue
+    for i, file in enumerate(files[start_idx: start_idx + batch_size]):
+        if not file.endswith("db"):
+            print("wrong file extension name")
+            continue
 
-            bag_path = os.path.join(root, file)
-            data_extractor.extract_data_from_file(bag_path, msg_decoder)
+        with open(args.record_file, "rt") as f_reader:
+            records = [x.strip() for x in f_reader.readlines()]
+        if args.mode + "_" + file in records:
+            print("bag_name {} already be extracted".format(file))
+            continue
 
-            with open(args.record_file, "a") as f_writer:
-                f_writer.write(args.mode + "_" + file + "\n")
+        bag_path = os.path.join(args.bag_dir, file)
+        data_extractor.extract_data_from_file(bag_path, msg_decoder)
+
+        with open(args.record_file, "a") as f_writer:
+            f_writer.write(args.mode + "_" + file + "\n")
+
+    print("Finish computing {} - {}".format(start_idx, start_idx + batch_size))
+
+
+def main():
+    start = time.time()
+    args = get_args()
+
+    files = os.listdir(args.bag_dir)
+    num_files = len(files)
+    print("Num of files: ", num_files)
+
+    n_proc = multiprocessing.cpu_count() - 2 if not args.debug else 1
+
+    batch_size = np.max([int(np.ceil(num_files / n_proc)), 1])
+    print('n_proc: {}, batch_size: {}'.format(n_proc, batch_size))
+
+    Parallel(n_jobs=n_proc)(delayed(load_bag_save_features)(args, i, batch_size, files)
+                            for i in range(0, num_files, batch_size))
+
+    print(f"Preprocess for {args.mode} set completed in {(time.time() - start) / 60.0} minutes")
 
 
 if __name__ == "__main__":

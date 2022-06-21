@@ -44,7 +44,7 @@ class AgentEncoder(nn.Module):
             self.subgraph = None
 
         self.input = nn.Sequential(
-            nn.Linear(2, n),
+            nn.Linear(30, n),
             nn.ReLU(inplace=True),
             Linear(n, n, ng=ng, act=False),
         )
@@ -74,9 +74,11 @@ class AgentEncoder(nn.Module):
             out = self.output(out).transpose(1, 2)
             out = self.subgraph(out)
 
-        agent_locs = rearrange(agent_locs[:, :, 10:].transpose(-1, -2), 'b c l -> b (c l)')
+        # agent_locs = rearrange(agent_locs[:, :, 10:].transpose(-1, -2), 'b c l -> b (c l)')
+        agent_locs = rearrange(agent_locs[:, :, 10:], 'b c l -> b (c l)')
         agent_ctrs = self.ctrs(agent_locs)
-        out += self.input(agent_locs[:, -3:-1] + agent_ctrs)
+        # out += self.input(agent_locs[:, -3:-1] + agent_ctrs)
+        out += self.input(agent_locs)
         out = self.relu(out)
         return out, agent_ctrs
 
