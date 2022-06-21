@@ -400,7 +400,7 @@ def main():
     Parallel(n_jobs=n_proc)(delayed(load_bag_save_features)(args, i, batch_size, files)
                             for i in range(0, num_files, batch_size))
 
-    print(f"Preprocess for {args.mode} set completed in {(time.time() - start) / 60.0} minutes")
+    print("Preprocess for {} set completed in {} minutes".format(args.mode, (time.time() - start) / 60.0))
 
 
 if __name__ == "__main__":
