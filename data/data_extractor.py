@@ -361,14 +361,21 @@ def main():
     for root, _, files in os.walk(args.bag_dir):
         files_loop = tqdm(enumerate(files), desc="Process", total=len(files), leave=True)
         for i, file in files_loop:
-            f = open(args.record_file, "a+")
             if not file.endswith("db"):
                 print("wrong file extension name")
                 continue
+
+            with open(args.record_file, "rt") as f_reader:
+                records = [x.strip() for x in f_reader.readlines()]
+            if args.mode + "_" + file in records:
+                print("bag_name {} already be extracted".format(file))
+                continue
+
             bag_path = os.path.join(root, file)
             data_extractor.extract_data_from_file(bag_path, msg_decoder)
-            f.write(file + "\n")
-            f.close()
+
+            with open(args.record_file, "a") as f_writer:
+                f_writer.write(args.mode + "_" + file + "\n")
 
 
 if __name__ == "__main__":
