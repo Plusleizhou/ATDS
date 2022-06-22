@@ -389,6 +389,15 @@ def main():
     args = get_args()
 
     files = os.listdir(args.bag_dir)
+    with open(args.record_file, "rt") as f_reader:
+        saved_files = [x.strip().replace(args.mode + "_", "", 1) for x in f_reader.readlines()]
+
+    # remove duplicated bags
+    for f in saved_files:
+        if f in files:
+            print("bag_name {} already be extracted".format(f))
+            files.remove(f)
+
     num_files = len(files)
     print("Num of files: ", num_files)
 
