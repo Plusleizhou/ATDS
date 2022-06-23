@@ -403,7 +403,7 @@ def main():
 
     n_proc = multiprocessing.cpu_count() - 2 if not args.debug else 1
 
-    batch_size = np.max([int(np.ceil(num_files / n_proc)), 1])
+    batch_size = np.max([int(np.ceil(num_files / float(n_proc))), 1])
     print('n_proc: {}, batch_size: {}'.format(n_proc, batch_size))
 
     Parallel(n_jobs=n_proc)(delayed(load_bag_save_features)(args, i, batch_size, files)
