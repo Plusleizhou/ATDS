@@ -31,8 +31,8 @@ config["num_scales"] = 6
 config["ignored_modules"] = []
 
 # Processed Dataset
-config["processed_train"] = "./data/features/train/"
-config["processed_val"] = "./data/features/val/"
+config["processed_train"] = "/home/plusai/code_space/dataset/features/train/"
+config["processed_val"] = "/home/plusai/code_space/dataset/features/val/"
 config["processed_test"] = "./data/features/test/"
 
 # train
