@@ -23,7 +23,6 @@ warnings.filterwarnings("ignore")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch ATDS-Net Training')
-    parser.add_argument('--local_rank', default=-1, type=int, help='node rank for distributed training')
     parser.add_argument('--save_path', default='log-0', type=str, help='checkpoint path')
     parser.add_argument('--epoch', default=50, type=int, help='training epoch')
     parser.add_argument('--batch_size', default=32, type=int, help='the number of samples for one batch')
@@ -80,8 +79,9 @@ def init_seeds(seed=0):
 
 def main():
     args = parse_args()
+    local_rank = int(os.environ["LOCAL_RANK"])
     dist.init_process_group(backend='nccl')
-    torch.cuda.set_device(args.local_rank)
+    torch.cuda.set_device(local_rank)
 
     # set seed
     init_seeds(dist.get_rank() + 1)
@@ -111,8 +111,8 @@ def main():
                                 collate_fn=collate_fn,
                                 pin_memory=True,
                                 sampler=val_sampler)
-    net = Net(config).cuda(args.local_rank)
-    net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[args.local_rank], find_unused_parameters=True)
+    net = Net(config).cuda(local_rank)
+    net = torch.nn.parallel.DistributedDataParallel(net, device_ids=[local_rank], find_unused_parameters=True)
 
     loss_net = Loss(config).cuda()
     if config["optimizer"] == "Adam":
@@ -189,5 +189,5 @@ def main():
 
 
 if __name__ == '__main__':
-    # python -m torch.distributed.launch --nproc_per_node=1 multiple_train.py
+    # torchrun --nproc_per_node=1 multiple_train.py
     main()
