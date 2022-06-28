@@ -15,9 +15,10 @@ import argparse
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch ATDS-Net Evaluating')
     parser.add_argument('--save_path', default='log-0', type=str, help='checkpoint path')
+    parser.add_argument("--val_path", default="./data/features/sampled_val/")
     parser.add_argument("--use_goal", action="store_true", default=False, help="whether to use goal")
     parser.add_argument('--devices', default='0', type=str, help='gpu devices for training')
-    parser.add_argument('--vis', action="store_true", default=False, help='whether to visualize the prediction')
+    parser.add_argument('--viz', action="store_true", default=False, help='whether to visualize the prediction')
     args = parser.parse_args()
 
     # update config
@@ -27,6 +28,7 @@ def parse_args():
     config["result"] = os.path.join("results", model_name, "result.txt")
     config["images"] = os.path.join("results", model_name, "images/")
     config["competition_files"] = os.path.join("results", model_name, "competition/")
+    config["processed_val"] = args.val_path
     return args
 
 
@@ -73,7 +75,7 @@ def main():
             # metrics记录了所有轨迹，实时计算平均误差
             if (i + 1) % 50 == 0:
                 val_out = post_out.display(metrics)  # agent的指标
-                if args.vis:
+                if args.viz:
                     visualization_for_all_agents(out, batch, i, True, False)
                     visualization(out, batch, i, True, False)
                 loop.set_postfix_str(f'total_loss={val_out["loss"]:.3f}, minFDE={val_out["fde"]:.3f}')

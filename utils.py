@@ -118,7 +118,7 @@ def visualization(out, data, num, save, show):
     # map
     ctrs = data["graph"][0]["ctrs"].detach().cpu().numpy()
     ctrs[:, :2] = ctrs[:, :2].dot(rot.T) + orig
-    ax.scatter(ctrs[:, 0], ctrs[:, 1], color="b", s=2, alpha=0.5)
+    # ax.scatter(ctrs[:, 0], ctrs[:, 1], color="b", s=2, alpha=0.5)
 
     feats = data["graph"][0]["feats"].detach().cpu().numpy()
     feats[:, :2] = feats[:, :2].dot(rot.T)
@@ -126,34 +126,31 @@ def visualization(out, data, num, save, show):
         vec = feats[j]
         pt0 = ctrs[j] - vec / 2
         pt1 = ctrs[j] + vec / 2
-        ax.arrow(pt0[0], pt0[1], (pt1 - pt0)[0], (pt1 - pt0)[1], edgecolor=None, color="deepskyblue", alpha=0.3)
+        ax.arrow(pt0[0], pt0[1], (pt1 - pt0)[0], (pt1 - pt0)[1], edgecolor=None, color="grey", alpha=0.5)
 
     # trajectories
     gt_preds = data["trajs_fut"][0][0].detach().cpu().numpy().dot(rot.T) + orig
     pad_fut = data["pad_fut"][0][0].detach().cpu().numpy()
-    ax.plot(gt_preds[:, 0], gt_preds[:, 1], marker=".", alpha=0.5, color="g", zorder=20)
-    ax.scatter(gt_preds[:, 0], gt_preds[:, 1], s=list((1 - pad_fut) * 50 + 1), color="b")
+    ax.plot(gt_preds[:-1, 0], gt_preds[:-1, 1], marker=".", alpha=1, color="g", zorder=20)
+    ax.arrow(gt_preds[-2, 0], gt_preds[-2, 1], (gt_preds[-1] - gt_preds[-2])[0], (gt_preds[-1] - gt_preds[-2])[1], 
+             color="g", alpha=1, width=1)
 
     trajs_obs = data["trajs_obs"][0][0].detach().cpu().numpy().dot(rot.T) + orig
     pad_obs = data["pad_obs"][0][0].detach().cpu().numpy()
-    ax.plot(trajs_obs[:, 0], trajs_obs[:, 1], marker=".", alpha=0.5, color="r", zorder=20)
-    ax.scatter(trajs_obs[:, 0], trajs_obs[:, 1], s=list((1 - pad_obs) * 50 + 1), color="b")
+    ax.plot(trajs_obs[:, 0], trajs_obs[:, 1], marker=".", alpha=1, color="r", zorder=20)
 
     preds = out['reg'][0][0].detach().cpu().numpy().dot(rot.T) + orig
     key_points = out["key_points"][0][0].detach().cpu().numpy().dot(rot.T) + orig
     probabilities = out['cls'][0][0]
-    probabilities = probabilities.detach().cpu().numpy()
+    probabilities = probabilities.detach().cpu().numpy() * 100
     for i in range(preds.shape[0]):
-        ax.scatter(preds[i, :, 0], preds[i, :, 1], marker="o", facecolors='none',
-                    edgecolors=(0, 1, 0), s=60, zorder=3, alpha=0.2)
-        ax.text(preds[i, -1, 0], preds[i, -1, 1], str("%.2f" % probabilities[i]), fontsize=8)
+        ax.scatter(preds[i, -1, 0], preds[i, -1, 1], marker="X", c="orange", s=10, zorder=20, alpha=1)
+        ax.text(preds[i, -1, 0], preds[i, -1, 1], str("%d" % probabilities[i]), fontsize=8, alpha=0.5, 
+                horizontalalignment="center", verticalalignment="bottom")
 
     fde = np.min(np.sqrt(np.sum((preds[:, -1, :] - gt_preds[-1:, :]) ** 2, axis=1)), axis=0)
     idx = np.argmin(np.sqrt(np.sum((preds[:, -1, :] - gt_preds[-1:, :]) ** 2, axis=1)), axis=0)
-    ax.scatter(preds[idx, :, 0], preds[idx, :, 1], marker="o", facecolors='none', edgecolors=(1, 0, 0),
-                s=60, zorder=3)
-    ax.scatter(key_points[idx, :, 0], key_points[idx, :, 1], marker="o", facecolors='none', edgecolors=(0, 1, 1),
-                s=60, zorder=3)
+    ax.scatter(preds[idx, -1, 0], preds[idx, -1, 1], marker="X", c="b", s=10, zorder=20, alpha=1)
 
     if save:
         plt.savefig(config["images"] + str("%d_%.3f" % (num, fde)) + '.png', dpi=250)

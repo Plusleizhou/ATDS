@@ -24,11 +24,14 @@ warnings.filterwarnings("ignore")
 def parse_args():
     parser = argparse.ArgumentParser(description='PyTorch ATDS-Net Training')
     parser.add_argument('--save_path', default='log-0', type=str, help='checkpoint path')
+    parser.add_argument("--train_path", default="./data/features/train/")
+    parser.add_argument("--val_path", default="./data/features/sampled_val/")
     parser.add_argument('--epoch', default=50, type=int, help='training epoch')
     parser.add_argument('--batch_size', default=32, type=int, help='the number of samples for one batch')
     parser.add_argument('--workers', default=0, type=int, help='the number of threads for loading data')
     parser.add_argument('--devices', default='0', type=str, help='gpu devices for training')
     parser.add_argument('--env', default='main', type=str, help='visdom env name')
+    parser.add_argument('--record', action="store_true", default=False, help='whether to record the running log')
     args = parser.parse_args()
 
     # update config
@@ -41,6 +44,8 @@ def parse_args():
     config["result"] = os.path.join("results", model_name, "result.txt")
     config["images"] = os.path.join("results", model_name, "images/")
     config["competition_files"] = os.path.join("results", model_name, "competition/")
+    config["processed_train"] = args.train_path
+    config["processed_val"] = args.val_path
     return args
 
 
@@ -169,7 +174,7 @@ def main():
             optimizer.step()
             scheduler.step(epoch)
 
-            if (i + 1) % (num_batches // config['num_display']) == 0 and dist.get_rank() == 0:
+            if args.record and (i + 1) % (num_batches // config['num_display']) == 0 and dist.get_rank() == 0:
                 train_out = post_out.display(metrics)
                 vis_visualization(vis, train_out, epoch)
                 iter_loop.set_postfix_str(
@@ -179,10 +184,11 @@ def main():
         if dist.get_rank() == 0:
             torch.save(net.state_dict(), config['save_dir'] + str(round(epoch)) + '.pth')
 
-        train_out = post_out.display(metrics)
-        iter_loop.set_postfix_str(f'lr={optimizer.param_groups[0]["lr"]:.5f}, total_loss={train_out["loss"]:.3f}, '
-                                  f'minFDE={train_out["fde"]:.3f}')
-        save_log(epoch, train_out)
+        if args.record:
+            train_out = post_out.display(metrics)
+            iter_loop.set_postfix_str(f'lr={optimizer.param_groups[0]["lr"]:.5f}, total_loss={train_out["loss"]:.3f}, '
+                                      f'minFDE={train_out["fde"]:.3f}')
+            save_log(epoch, train_out)
         if round(epoch) % config['num_val'] == 0:
             val_out = val(val_dataloader, net, loss_net, dist.get_rank())
             save_log(epoch, val_out, True)
