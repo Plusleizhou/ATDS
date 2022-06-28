@@ -166,8 +166,10 @@ def main():
 
             out = net(batch)
             loss_out = loss_net(out, batch)
-            post_out = PostProcess(out, batch)  # 只记录了agent的pred，gt_pred, 和has_pred
-            post_out.append(metrics, loss_out)  # 加入了全部agent的loss_out
+
+            if args.record:
+                post_out = PostProcess(out, batch)  # 只记录了agent的pred，gt_pred, 和has_pred
+                post_out.append(metrics, loss_out)  # 加入了全部agent的loss_out
 
             optimizer.zero_grad()
             loss_out['loss'].backward()
