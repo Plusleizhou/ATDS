@@ -17,6 +17,7 @@ def parse_args():
     parser.add_argument('--save_path', default='log-0', type=str, help='checkpoint path')
     parser.add_argument("--val_path", default="./data/features/sampled_val/")
     parser.add_argument("--use_goal", action="store_true", default=False, help="whether to use goal")
+    parser.add_argument('--num_preds', default=30, type=int, help="the number of prediction frames")
     parser.add_argument('--devices', default='0', type=str, help='gpu devices for training')
     parser.add_argument('--viz', action="store_true", default=False, help='whether to visualize the prediction')
     args = parser.parse_args()
@@ -74,12 +75,12 @@ def main():
             post_out.append(metrics, loss_out)  # 加入了全部agent的loss_out
             # metrics记录了所有轨迹，实时计算平均误差
             if (i + 1) % 50 == 0:
-                val_out = post_out.display(metrics)  # agent的指标
+                val_out = post_out.display(metrics, args.num_preds)  # agent的指标
                 if args.viz:
                     visualization_for_all_agents(out, batch, i, True, False)
                     visualization(out, batch, i, True, False)
                 loop.set_postfix_str(f'total_loss={val_out["loss"]:.3f}, minFDE={val_out["fde"]:.3f}')
-    val_out = post_out.display(metrics)
+    val_out = post_out.display(metrics, args.num_preds)
     for k, v in val_out.items():
         print("{}: {:.4f}".format(k, v))
     loop.set_postfix_str(f'total_loss={val_out["loss"]:.3f}, minFDE={val_out["fde"]:.3f}')

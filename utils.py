@@ -60,7 +60,7 @@ class PostProcess(object):
         return metrics
 
     @staticmethod
-    def display(metrics):
+    def display(metrics, num_preds=30):
         cls = metrics["cls_loss"] / (metrics["num_cls"] + 1e-10)
         reg = metrics["reg_loss"] / (metrics["num_reg"] + 1e-10)
         key_points = metrics["key_points_loss"] / (metrics["num_key_points"] + 1e-10)
@@ -69,7 +69,7 @@ class PostProcess(object):
         preds = np.concatenate(metrics["preds"], 0)
         gt_preds = np.concatenate(metrics["gt_preds"], 0)
         has_preds = np.concatenate(metrics["has_preds"], 0)
-        ade1, fde1, ade, fde, min_ids = pred_metrics(preds, gt_preds, has_preds)
+        ade1, fde1, ade, fde, min_ids = pred_metrics(preds, gt_preds, has_preds, num_preds)
         out = {
             "loss": loss,
             "cls": cls,
@@ -83,7 +83,7 @@ class PostProcess(object):
         return out
 
 
-def pred_metrics(preds, gt_preds, has_preds):
+def pred_metrics(preds, gt_preds, has_preds, num_preds):
     assert has_preds.all()
     preds = np.asarray(preds, np.float32)
     gt_preds = np.asarray(gt_preds, np.float32)
@@ -91,14 +91,14 @@ def pred_metrics(preds, gt_preds, has_preds):
     # err: n * 6 * 30
     err = np.sqrt(((preds - np.expand_dims(gt_preds, 1)) ** 2).sum(3))
 
-    ade1 = err[:, 0].mean()
-    fde1 = err[:, 0, -1].mean()
+    ade1 = err[:, 0, :num_preds].mean()
+    fde1 = err[:, 0, num_preds - 1].mean()
 
     min_ids = err[:, :, -1].argmin(1)
     row_ids = np.arange(len(min_ids)).astype(np.int64)
     err = err[row_ids, min_ids]
-    ade = err.mean()
-    fde = err[:, -1].mean()
+    ade = err[..., :num_preds].mean()
+    fde = err[..., num_preds - 1].mean()
     return ade1, fde1, ade, fde, min_ids
 
 
