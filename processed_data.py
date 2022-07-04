@@ -38,24 +38,34 @@ class ProcessedDataset(Dataset):
         ts = df_dict["TIMESTAMP"]
 
         trajs = df_dict["TRAJS"]
-        trajs_obs = trajs[:, :config["num_obs"]]
-        trajs_fut = trajs[:, config["num_obs"]:]
-
         pad_flags = df_dict["PAD_FLAGS"]
-        pad_obs = pad_flags[:, :config["num_obs"]]
-        pad_fut = pad_flags[:, config["num_obs"]:]
-
         graph = df_dict["GRAPH"]
+
+        # chose new vehicle coordinate
+        if self.train:
+            idx = np.random.randint(len(trajs))
+            # transform from agent coordinate to other vehicle coordinate
+            orig = trajs[idx, config["num_obs"] - 1]
+            vec = orig - trajs[idx, 0]
+            theta = np.arctan2(vec[1], vec[0])
+            rot = np.array([[np.cos(theta), -np.sin(theta)],
+                            [np.sin(theta), np.cos(theta)]])
+            trajs = (np.asarray(trajs) - orig).dot(rot)
+            graph["ctrs"] = (np.asarray(graph["ctrs"]) - orig).dot(rot)
+            graph["feats"] = (np.asarray(graph["feats"])).dot(rot)
+            # transform from vehicle coordinate to world coordinate
+            orig = np.matmul(orig, df_dict["ROT"]) + df_dict["ORIG"]
+            rot = np.matmul(rot, df_dict["ROT"])
 
         data = {
             "seq_id": seq_id,
             "orig": orig,
             "rot": rot,
             "ts": np.diff(ts, prepend=ts[0])[:config["num_obs"]],
-            "trajs_obs": trajs_obs,
-            "pad_obs": pad_obs,
-            "trajs_fut": trajs_fut,
-            "pad_fut": pad_fut,
+            "trajs_obs": trajs[:, :config["num_obs"]],
+            "pad_obs": pad_flags[:, :config["num_obs"]],
+            "trajs_fut": trajs[:, config["num_obs"]:],
+            "pad_fut": pad_flags[:, config["num_obs"]:],
             "graph": graph
         }
 
