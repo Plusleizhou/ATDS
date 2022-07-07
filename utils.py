@@ -148,8 +148,10 @@ def visualization(out, data, num, save, show):
         ax.text(preds[i, -1, 0], preds[i, -1, 1], str("%d" % probabilities[i]), fontsize=8, alpha=0.5, 
                 horizontalalignment="center", verticalalignment="bottom")
 
-    fde = np.min(np.sqrt(np.sum((preds[:, -1, :] - gt_preds[-1:, :]) ** 2, axis=1)), axis=0)
-    idx = np.argmin(np.sqrt(np.sum((preds[:, -1, :] - gt_preds[-1:, :]) ** 2, axis=1)), axis=0)
+    ade1, fde1, ade, fde, idx = pred_metrics(np.expand_dims(preds, 0), np.expand_dims(gt_preds, 0),
+                                                 pad_fut, config["num_preds"])
+    ax.text(x_max, y_min, "ade1: {:.3f}\nfde1: {:.3f}\nade6: {:.3f}\nfde6: {:.3f}".format(ade1, fde1, ade, fde),
+            fontsize=15, horizontalalignment="right", verticalalignment="bottom")
     ax.scatter(preds[idx, -1, 0], preds[idx, -1, 1], marker="X", c="b", s=10, zorder=20, alpha=1)
 
     if save:

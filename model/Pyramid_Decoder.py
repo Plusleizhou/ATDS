@@ -117,3 +117,30 @@ class PyramidDecoder(nn.Module):
             out['reg'].append(reg[ids])
             out['key_points'].append(key_points[ids])
         return out
+
+
+class Generator(nn.Module):
+    def __init__(self, config):
+        super(Generator, self).__init__()
+        self.config = config
+
+    def forward(self, agents, agent_ids, agent_ctrs):
+        speed = (agents.sum(-1) / (agents[:, -1].sum(-1) - 1 + 1e-10).unsqueeze(-1))
+        agent_ctrs = torch.cat(agent_ctrs, dim=0)
+        reg = agent_ctrs.view(-1, 1, 2).repeat(1, 30, 1)
+        for i in range(self.config["num_preds"]):
+            reg[:, i] = reg[:, i] + speed[:, :2] * (i + 1)
+
+        reg = reg.unsqueeze(1).repeat(1, 6, 1, 1)
+        reg[:, :, -1] += torch.randn_like(reg[:, :, -1])
+        key_points = reg[:, :, [-1, 9, 19, -1]]
+        cls = torch.softmax(torch.rand(reg.shape[0], reg.shape[1]), dim=-1)
+
+        out = dict()
+        out['cls'], out['reg'], out['key_points'] = [], [], []
+        for i in range(len(agent_ids)):
+            ids = agent_ids[i]
+            out['cls'].append(cls[ids])
+            out['reg'].append(reg[ids])
+            out['key_points'].append(key_points[ids])
+        return out

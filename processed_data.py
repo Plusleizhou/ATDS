@@ -92,6 +92,29 @@ class ProcessedDataset(Dataset):
         return data
 
 
+class SeqProcessedDataset(Dataset):
+    def __init__(self, path, mode):
+        super(SeqProcessedDataset, self).__init__()
+        self.path = path
+        self.mode = mode
+        self.train = False
+        if self.mode == "train":
+            self.train = True
+        file_list = os.listdir(path)
+        self.file_list = sorted(file_list)
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, item):
+        file = self.file_list[item]
+        df = pd.read_pickle(os.path.join(self.path, file))
+        data = {}
+        for key in list(df.keys()):
+            data[key] = df[key].values[0]
+        return data
+
+
 def ref_copy(data):
     if isinstance(data, list):
         return [ref_copy(x) for x in data]

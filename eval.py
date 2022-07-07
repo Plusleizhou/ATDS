@@ -4,9 +4,8 @@ from torch.utils.data import DataLoader
 from load_config import config
 from model.Net import Net
 from model.Net import Loss
-from utils import PostProcess, gpu
-from processed_data import ProcessedDataset, collate_fn
-from utils import visualization, visualization_for_all_agents
+from processed_data import collate_fn
+from utils import visualization_for_all_agents
 import os
 from train import load_prev_weights
 import argparse
@@ -20,6 +19,7 @@ def parse_args():
     parser.add_argument('--num_preds', default=30, type=int, help="the number of prediction frames")
     parser.add_argument('--devices', default='0', type=str, help='gpu devices for training')
     parser.add_argument('--viz', action="store_true", default=False, help='whether to visualize the prediction')
+    parser.add_argument('--mode', default='ego', type=str, help='ego/seq')
     args = parser.parse_args()
 
     # update config
@@ -33,8 +33,22 @@ def parse_args():
     return args
 
 
+def loader(args):
+    assert args.mode in ["ego", "seq"]
+    if args.mode == "ego":
+        from utils import visualization
+        from processed_data import ProcessedDataset
+        from utils import PostProcess
+    else:
+        from tools.seq_utils import visualization
+        from processed_data import SeqProcessedDataset as ProcessedDataset
+        from tools.seq_utils import SeqPostProcess as PostProcess
+    return visualization, ProcessedDataset, PostProcess
+
+
 def main():
     args = parse_args()
+    visualization, ProcessedDataset, PostProcess = loader(args)
     dataset = ProcessedDataset(config["processed_val"], mode="val")
     val_dataloader = DataLoader(dataset,
                                 batch_size=config['val_batch_size'],
