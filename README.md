@@ -31,6 +31,11 @@ python ./data/data_utils/data_sampling.py --src data/features/train \
 python ./data/data_utils/data_flatten.py --src ./data/features/baseline/ \
                                          --dst ./data/features/flattened_baseline
 ```
+5. Pick up those samples which can not be predicted using constant velocity model.
+```shell
+python ./data/data_utils/data_selection.py --src ./data/features/baseline/ \
+                                           --dst ./data/features/selected_baseline
+```
 
 # Train
 ```shell
