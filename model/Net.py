@@ -74,9 +74,12 @@ def agent_gather(trajs_obs, pad_obs):
 
     agents = [x.transpose(1, 2) for x in agents]
     agents = torch.cat(agents, 0)
+    agents[:, :2] *= agents[:, -1:]
+    agents[:, :2, 1:] *= agents[:, -1:, :-1]
 
     agent_locs = [x.transpose(1, 2) for x in agent_locs]
     agent_locs = torch.cat(agent_locs, 0)
+    agent_locs[:, :2] *= agent_locs[:, -1:]
 
     agent_ids = []
     count = 0
