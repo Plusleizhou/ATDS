@@ -139,7 +139,7 @@ class Loss(nn.Module):
         self.pred_loss = PredLoss(config)
 
     def forward(self, out, data):
-        loss_out = self.pred_loss(out, gpu(data["trajs_fut"]), gpu(data["pad_fut"]))
+        loss_out = self.pred_loss(out, gpu(data["trajs_fut"]), gpu(data["pad_fut"]), gpu(data["update_mask"]))
         loss_out["loss"] = loss_out["cls_loss"] / (loss_out["num_cls"] + 1e-10) + \
                            loss_out["reg_loss"] / (loss_out["num_reg"] + 1e-10) + \
                            loss_out["key_points_loss"] / (loss_out["num_key_points"] + 1e-10)

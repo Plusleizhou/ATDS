@@ -9,13 +9,20 @@ class PredLoss(nn.Module):
         self.config = config
         self.reg_loss = nn.SmoothL1Loss(reduction="sum")
 
-    def forward(self, out, gt_preds, has_preds):
+    def forward(self, out, gt_preds, has_preds, update_mask):
         cls, reg, key_points = out["cls"], out["reg"], out["key_points"]
         cls = torch.cat([x for x in cls], 0)
         reg = torch.cat([x for x in reg], 0)
         key_points = torch.cat([x for x in key_points], 0)
         gt_preds = torch.cat([x for x in gt_preds], 0)
         has_preds = torch.cat([x for x in has_preds], 0) == 1
+
+        mask = torch.cat([x for x in update_mask], 0)
+        cls = cls[mask]
+        reg = reg[mask]
+        key_points = key_points[mask]
+        gt_preds = gt_preds[mask]
+        has_preds = has_preds[mask]
 
         loss_out = dict()
         zero = 0.0 * (cls.sum() + reg.sum())

@@ -41,9 +41,12 @@ class ProcessedDataset(Dataset):
         pad_flags = df_dict["PAD_FLAGS"]
         graph = df_dict["GRAPH"]
 
+        update_mask = (np.abs(trajs[:, config["num_obs"] - 1, 0]) < 100) * \
+                      (np.abs(trajs[:, config["num_obs"] - 1, 1]) < 7)
+
         # chose new vehicle coordinate
         if self.train:
-            idx = np.random.randint(len(trajs))
+            idx = np.random.choice(np.nonzero(update_mask)[0], 1)[0]
             # transform from agent coordinate to other vehicle coordinate
             orig = trajs[idx, config["num_obs"] - 1]
             vec = orig - trajs[idx, 0]
@@ -66,7 +69,8 @@ class ProcessedDataset(Dataset):
             "pad_obs": pad_flags[:, :config["num_obs"]],
             "trajs_fut": trajs[:, config["num_obs"]:],
             "pad_fut": pad_flags[:, config["num_obs"]:],
-            "graph": graph
+            "graph": graph,
+            "update_mask": update_mask
         }
 
         if self.train is True:
