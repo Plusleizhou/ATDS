@@ -21,7 +21,13 @@ class SelectionDataset(Dataset):
         file_list.sort(key=lambda x: int(x.split(".")[0].split("_")[-3]) +
                                      len(file_list) * int(x.split(".")[0].split("_")[-2]))
         self.file_list = file_list
-        self.selected_files = []
+        self.selected_files = {
+            "2": [],
+            "4": [],
+            "6": [],
+            "8": [],
+            "10": []
+        }
 
     def __len__(self):
         return len(self.file_list)
@@ -42,6 +48,9 @@ class SelectionDataset(Dataset):
         trajs_fut = trajs[:, self.obs_len:]
         pad_obs = pad_flags[:, :self.obs_len]
         pad_fut = pad_flags[:, self.obs_len:]
+
+        if not np.all(np.argmax(pad_obs, axis=1) >= np.argmin(pad_obs, axis=1)) or not np.all(pad_obs[:, -2]):
+            return sum([len(v) for k, v in self.selected_files.items()]), seq_id
 
         feats = np.zeros_like(trajs_obs)
         feats[:, 1:] = trajs_obs[:, 1:] - trajs_obs[:, :-1]
@@ -65,19 +74,31 @@ class SelectionDataset(Dataset):
         row_ids = np.arange(len(last_ids)).astype(np.int16)
         dist = np.sqrt(((trajs_pred[row_ids, last_ids] - trajs_fut[row_ids, last_ids]) ** 2).sum(1))
 
-        if np.all(pad_obs[:, -2]) and dist.mean() > 2.0:
-            self.selected_files.append(seq_id)
+        if dist.mean() <= 2.0:
+            self.selected_files["2"].append(seq_id)
+        elif 2.0 < dist.mean() <= 4.0:
+            self.selected_files["4"].append(seq_id)
+        elif 4.0 < dist.mean() <= 6.0:
+            self.selected_files["6"].append(seq_id)
+        elif 6.0 < dist.mean() <= 8.0:
+            self.selected_files["8"].append(seq_id)
+        elif 8.0 < dist.mean() <= 10.0:
+            self.selected_files["10"].append(seq_id)
 
-        return len(self.selected_files), seq_id
+        return sum([len(v) for k, v in self.selected_files.items()]), seq_id
 
 
 def move_files(files, path, dst):
-    print(len(files))
-    for file in files:
-        if os.path.exists(path + file + "_argo.pkl"):
-            shutil.copyfile(path + file + "_argo.pkl", dst + file + "_argo.pkl")
-        else:
-            print("file: {} not found".format(path + file + "_argo.pkl"))
+    print(sum([len(v) for k, v in files.items()]))
+    for k, v in files.items():
+        saved_path = os.path.join(dst, str(k))
+        if not os.path.exists(saved_path):
+            os.mkdir(saved_path)
+        for file in v:
+            if os.path.exists(path + file + "_argo.pkl"):
+                shutil.copyfile(path + file + "_argo.pkl", os.path.join(saved_path, file + "_argo.pkl"))
+            else:
+                print("file: {} not found".format(path + file + "_argo.pkl"))
 
 
 def search_for_tough_case(dataset, start_idx, batch_size, path, dst):
