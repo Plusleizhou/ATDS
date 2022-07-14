@@ -98,7 +98,8 @@ class PlusPreproc(object):
             "NOT_SET": 4
         }
 
-        self.columns = ["TIMESTAMP", "FRAMES", "TRACK_ID", "OBJECT_TYPE", "X", "Y", "V", "YAW", "EGO_RELATION"]
+        self.columns = ["TIMESTAMP", "FRAMES", "TRACK_ID", "OBJECT_TYPE", "X", "Y", "V", "YAW", "EGO_RELATION",
+                        "HAS_PREDS", "PRED_TRAJ"]
 
         self.det_type = {
             "DONTCARE": 0,
@@ -202,7 +203,7 @@ class PlusPreproc(object):
                     if len(odom) > 0:
                         obs_list.append(
                             [ts, obs_num, self.ego_id, self.det_type["AV"], odom[0], odom[1], odom[2], odom[3],
-                             self.ego_relation["EGO"]])
+                             self.ego_relation["EGO"], False, None])
 
                     # lane
                     if lane_msg is not None and len(lane_msg.lane) > 0:
@@ -243,7 +244,7 @@ class PlusPreproc(object):
                                     point = lane_points[i]
                                     lane_list.append(
                                         [ts, obs_num, lane_id, self.det_type["CENTER_LANE"], point.x, point.y, 0, 0,
-                                         ego_relation])
+                                         ego_relation, None, None])
 
                             for segment in lane.left_boundary.curve.segment:
                                 lane_points = segment.line_segment.point
@@ -258,7 +259,7 @@ class PlusPreproc(object):
                                     point = lane_points[i]
                                     lane_list.append(
                                         [ts, obs_num, lane_id, self.det_type["LEFT_BOUNDARY"], point.x, point.y, 0, 0,
-                                         ego_relation])
+                                         ego_relation, None, None])
 
                             for segment in lane.right_boundary.curve.segment:
                                 lane_points = segment.line_segment.point
@@ -273,19 +274,30 @@ class PlusPreproc(object):
                                     point = lane_points[i]
                                     lane_list.append(
                                         [ts, obs_num, lane_id, self.det_type["RIGHT_BOUNDARY"], point.x, point.y, 0, 0,
-                                         ego_relation])
+                                         ego_relation, None, None])
 
                     # obstacle step 2: obtain info of surrounding agents
                     pred_obs = msg.prediction_obstacle
                     if not pred_obs:
                         continue
-                    for pred_ob in pred_obs:
+                    for i, pred_ob in enumerate(pred_obs):
+                        # trajectory
+                        pred = pred_ob.trajectory
+                        if len(pred) == 1:
+                            has_preds = True
+                            pred_traj = np.zeros((len(pred[0].trajectory_point[1:]), 2))
+                            for k, loc in enumerate(pred[0].trajectory_point[1:]):
+                                pred_traj[k, 0] = loc.x
+                                pred_traj[k, 1] = loc.y
+                        else:
+                            has_preds = False
+                            pred_traj = None
                         # perception obstacle
                         obs = pred_ob.perception_obstacle
                         v = math.sqrt(obs.motion.vx * obs.motion.vx + obs.motion.vy * obs.motion.vy)
                         obs_list.append(
                             [ts, obs_num, obs.id, obs.type, obs.motion.x, obs.motion.y, v, obs.motion.yaw,
-                             pred_ob.ego_relation])
+                             pred_ob.ego_relation, has_preds, pred_traj])
 
                 if topic_name == "/perception/lane_path":
                     lane_msg = msg

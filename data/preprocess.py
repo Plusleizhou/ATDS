@@ -48,14 +48,14 @@ class PreProcess(object):
 
     def process(self, seq_id, df):
         # get trajectories
-        ts, trajs, pad_flags, orig, rot = self.get_trajectories(df)
+        ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds = self.get_trajectories(df)
 
         # build lane graph
         graph = self.get_lane_graph(df, orig, rot)
 
         # save data
-        data = [[seq_id, orig, rot, ts, trajs, pad_flags, graph]]
-        headers = ["SEQ_ID", "ORIG", "ROT", "TIMESTAMP", "TRAJS", "PAD_FLAGS", "GRAPH"]
+        data = [[seq_id, orig, rot, ts, trajs, pad_flags, graph, has_preds, pred_trajs]]
+        headers = ["SEQ_ID", "ORIG", "ROT", "TIMESTAMP", "TRAJS", "PAD_FLAGS", "GRAPH", "HAS_PREDS", "PRED_TRAJS"]
 
         # for debug
         if self.args.debug and self.args.viz:
@@ -78,6 +78,7 @@ class PreProcess(object):
         t_obs = ts[self.args.obs_len - 1]
 
         trajs, pad_flags = [], []
+        pred_trajs, has_preds = [], [False]
 
         agent_traj = df[df["OBJECT_TYPE"] == self.det_type["AGENT"]]
         agent_traj = np.stack((agent_traj["X"].values, agent_traj["Y"].values), axis=1)
@@ -92,11 +93,20 @@ class PreProcess(object):
                 continue
 
             ts_sur = np.array(sur_traj["TIMESTAMP"].values).astype(np.float64)
-            sur_traj = np.stack((sur_traj["X"].values, sur_traj["Y"].values), axis=1)
 
             if np.all(ts_sur > t_obs) or t_obs not in ts_sur:
                 continue
 
+            # predicted trajectory by relu-based method
+            sur_traj_obs = sur_traj[sur_traj["TIMESTAMP"] == t_obs]
+            pred_traj = sur_traj_obs["PRED_TRAJ"].values[0]
+            if np.all(sur_traj_obs["HAS_PREDS"].values) and pred_traj.shape[0] >= 30:
+                pred_trajs.append(pred_traj)
+                has_preds.append(True)
+            else:
+                has_preds.append(False)
+
+            sur_traj = np.stack((sur_traj["X"].values, sur_traj["Y"].values), axis=1)
             _, ids, _ = np.intersect1d(ts, ts_sur, return_indices=True)
             padded = np.zeros_like(ts)
             padded[ids] = 1
@@ -115,13 +125,21 @@ class PreProcess(object):
         orig, rot = self.get_origin_rotation(agent_traj)
         orig = orig.astype(np.float32)
         rot = rot.astype(np.float32)
+
+        # predicted trajectory by relu-based method
+        if len(pred_trajs) > 0:
+            pred_trajs = (np.asarray(pred_trajs) - orig).dot(rot)
+        else:
+            pred_trajs = np.zeros((0, 50, 2))
+        has_preds = np.asarray(has_preds).astype(np.int16)
+
         trajs = (np.asarray(trajs) - orig).dot(rot)
 
         ts = (ts - ts[0]).astype(np.float32)
         trajs = trajs.astype(np.float32)
         pad_flags = np.array(pad_flags).astype(np.int16)
 
-        return ts, trajs, pad_flags, orig, rot
+        return ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds
 
     def get_origin_rotation(self, agent_traj):
         orig = agent_traj[self.args.obs_len - 1]
