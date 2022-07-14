@@ -4,16 +4,17 @@ from load_config import config
 import matplotlib.pyplot as plt
 
 
-class SeqPostProcess(object):
+class BasePostProcess(object):
     def __init__(self, out=None, data=None):
         # agent trajectory is in the first pos
         self.post_out = dict()
         if out is not None:
-            self.post_out['preds'] = [x[0:1].detach().cpu().numpy() for x in out['reg']]
+            self.post_out['preds'] = [x[mask == 1].detach().cpu().numpy()
+                                      for x, mask in zip(out['reg'], data["has_preds"])]
         if data is not None:
-            self.post_out["gt_preds"] = [x[0:1].numpy() for x in data["trajs_fut"]]
-            self.post_out["pred_trajs"] = [x[0:1].numpy() for x in data["pred_trajs"]]
-            self.post_out["has_preds"] = [x[0:1].numpy() for x in data["pad_fut"]]
+            self.post_out["gt_preds"] = [x[mask == 1].numpy() for x, mask in zip(data["trajs_fut"], data["has_preds"])]
+            self.post_out["has_preds"] = [x[mask == 1].numpy() for x, mask in zip(data["pad_fut"], data["has_preds"])]
+            self.post_out["pred_trajs"] = [x.numpy() for x in data["pred_trajs"]]
 
     def append(self, metrics, loss_out):
         # initialize
@@ -50,7 +51,7 @@ class SeqPostProcess(object):
         has_preds = np.concatenate(metrics["has_preds"], 0)
         pred_trajs = np.concatenate(metrics["pred_trajs"], 0)
         base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids = pred_metrics(preds, pred_trajs, gt_preds,
-                                                                               has_preds, num_preds)
+                                                                           has_preds, num_preds)
         out = {
             "loss": loss,
             "cls": cls,
@@ -67,14 +68,20 @@ class SeqPostProcess(object):
 
 
 def pred_metrics(preds, pred_trajs, gt_preds, has_preds, num_preds):
+    mask = (np.abs(gt_preds[:, 0, 0]) < 100) * (np.abs(gt_preds[:, 0, 1]) < 7)
+    pred_trajs = pred_trajs[mask]
+    gt_preds = gt_preds[mask]
+    has_preds = has_preds[mask]
+    preds = preds[mask]
+
     has_preds = (has_preds == 1)[:, :num_preds]
     has_final_preds = has_preds[:, num_preds - 1]  # which has final point
 
     # baseline
     base_ade1 = np.sqrt((np.sum((gt_preds[:, :num_preds][has_preds] -
-                                 pred_trajs[:, :num_preds][has_preds]) ** 2, axis=-1))).mean()
+                                pred_trajs[:, :num_preds][has_preds]) ** 2, axis=-1))).mean()
     base_fde1 = np.sqrt((np.sum((gt_preds[:, num_preds - 1][has_final_preds] -
-                                 pred_trajs[:, num_preds - 1][has_final_preds]) ** 2, axis=-1))).mean()
+                                pred_trajs[:, num_preds - 1][has_final_preds]) ** 2, axis=-1))).mean()
 
     # model
     preds = np.asarray(preds, np.float32)
@@ -111,10 +118,16 @@ def visualization(out, data, num, save, show):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
 
+    color_map = ['Greys', 'Purples', 'Blues', 'Greens', 'Oranges', 'Reds',
+                 'YlOrBr', 'YlOrRd', 'OrRd', 'PuRd', 'RdPu', 'BuPu',
+                 'GnBu', 'PuBu', 'YlGnBu', 'PuBuGn', 'BuGn', 'YlGn']
+    colors = ['#2A2A2A', '#481184', '#083D7E', '#005924', '#8E2D03', '#8B2B03',
+              '#762905', '#772A05', '#8F0000', '#7A002D', '#5C006F', '#650762',
+              '#084D8F', '#02446B', '#142772', '#015947', '#005622', '#004E2C']
+
     # map
     ctrs = data["graph"][0]["ctrs"].detach().cpu().numpy()
     ctrs[:, :2] = ctrs[:, :2].dot(rot.T) + orig
-    # ax.scatter(ctrs[:, 0], ctrs[:, 1], color="b", s=2, alpha=0.5)
 
     feats = data["graph"][0]["feats"].detach().cpu().numpy()
     feats[:, :2] = feats[:, :2].dot(rot.T)
@@ -124,47 +137,65 @@ def visualization(out, data, num, save, show):
         pt1 = ctrs[j] + vec / 2
         ax.arrow(pt0[0], pt0[1], (pt1 - pt0)[0], (pt1 - pt0)[1], edgecolor=None, color="grey", alpha=0.5)
 
-    # trajectories
+    # ego
     gt_preds = data["trajs_fut"][0][0].detach().cpu().numpy().dot(rot.T) + orig
     pad_fut = data["pad_fut"][0][0].detach().cpu().numpy()
-    ax.plot(gt_preds[:-1, 0], gt_preds[:-1, 1], marker=".", alpha=1, color="g", zorder=20, label="Future trajectory")
+    ax.plot(gt_preds[:-1, 0], gt_preds[:-1, 1], marker=".", alpha=1, color="g", zorder=20)
     ax.arrow(gt_preds[-2, 0], gt_preds[-2, 1], (gt_preds[-1] - gt_preds[-2])[0], (gt_preds[-1] - gt_preds[-2])[1],
              color="g", alpha=1, width=1)
 
-    pred_trajs = data["pred_trajs"][0][0].detach().cpu().numpy().dot(rot.T) + orig
-    ax.scatter(pred_trajs[29, 0], pred_trajs[29, 1], marker="X", c="red", s=20, zorder=20, alpha=1,
-               label="Predicted goal (baseline)")
-
     trajs_obs = data["trajs_obs"][0][0].detach().cpu().numpy().dot(rot.T) + orig
     pad_obs = data["pad_obs"][0][0].detach().cpu().numpy()
-    ax.plot(trajs_obs[:, 0], trajs_obs[:, 1], marker=".", alpha=1, color="r", zorder=20, label="Historical trajectory")
+    ax.plot(trajs_obs[:, 0], trajs_obs[:, 1], marker=".", alpha=1, color="r", zorder=20)
 
-    preds = out['reg'][0][0].detach().cpu().numpy().dot(rot.T) + orig
-    key_points = out["key_points"][0][0].detach().cpu().numpy().dot(rot.T) + orig
-    probabilities = out['cls'][0][0]
-    probabilities = probabilities.detach().cpu().numpy() * 100
-    for i in range(preds.shape[0]):
-        ax.scatter(preds[i, -1, 0], preds[i, -1, 1], marker="X", c="orange", s=10, zorder=20, alpha=1)
-        ax.text(preds[i, -1, 0], preds[i, -1, 1], str("%d" % probabilities[i]), fontsize=8, alpha=0.5,
-                horizontalalignment="center", verticalalignment="bottom")
+    # surrounding agents
+    has_preds = data["has_preds"][0].detach().cpu().numpy().astype(np.bool)
+    pred_trajs = data["pred_trajs"][0].detach().cpu().numpy().dot(rot.T) + orig
+    gt_preds = data["trajs_fut"][0][has_preds].detach().cpu().numpy().dot(rot.T) + orig
+    pad_fut = data["pad_fut"][0][has_preds].detach().cpu().numpy() == 1
+    trajs_obs = data["trajs_obs"][0][has_preds].detach().cpu().numpy().dot(rot.T) + orig
+    pad_obs = data["pad_obs"][0][has_preds].detach().cpu().numpy().astype(np.bool)
+    preds = out['reg'][0][has_preds].detach().cpu().numpy().dot(rot.T) + orig
+    probabilities = out['cls'][0][has_preds].detach().cpu().numpy() * 100
+    for i in range(gt_preds.shape[0]):
+        gt_pred = gt_preds[i][pad_fut[i]]
+        if gt_pred.shape[0] == 0:
+            continue
+        traj_obs = trajs_obs[i][pad_obs[i]]
+        pred_traj = pred_trajs[i, :pad_fut[i].shape[0]][pad_fut[i]]
+        ax.scatter(pred_traj[-1, 0], pred_traj[-1, 1], marker="X", c=colors[i % 18], s=20, zorder=20, alpha=1)
+        ax.plot(gt_pred[:-1, 0], gt_pred[:-1, 1],
+                marker=".", alpha=1, color=colors[i % 18], zorder=20)
+        if gt_pred.shape[0] >= 2:
+            ax.arrow(gt_pred[-2, 0], gt_pred[-2, 1],
+                     (gt_pred[-1] - gt_pred[-2])[0], (gt_pred[-1] - gt_pred[-2])[1],
+                     color=colors[i % 18], alpha=1, width=1)
+        else:
+            ax.arrow(traj_obs[-1, 0], traj_obs[-1, 1],
+                     (gt_pred[-1] - traj_obs[-1, 0])[0], (gt_pred[-1] - traj_obs[-1, 1])[1],
+                     color=colors[i % 18], alpha=1, width=1)
+        ax.plot(traj_obs[:, 0], traj_obs[:, 1], marker=".", alpha=0.5, color=colors[i % 18], zorder=20)
+        ax.scatter(traj_obs[:, 0], traj_obs[:, 1], marker="o",
+                   c=np.arange(traj_obs.shape[0]), cmap=color_map[i % 18])
+        for k in range(preds.shape[1]):
+            pred = preds[i, k][pad_fut[i]]
+            ax.scatter(pred[-1, 0], pred[-1, 1], marker="X", c="orange", s=10, zorder=20, alpha=1)
+            ax.text(pred[-1, 0], pred[-1, 1], str("%d" % probabilities[i, k]), fontsize=8, alpha=0.5,
+                    horizontalalignment="center", verticalalignment="bottom")
 
-    base_ade1, base_fde1, ade1, fde1, ade, fde, idx = pred_metrics(np.expand_dims(preds, 0),
-                                                                           np.expand_dims(pred_trajs, 0),
-                                                                           np.expand_dims(gt_preds, 0),
-                                                                           np.expand_dims(pad_fut, 0),
-                                                                           config["num_preds"])
+    base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids = pred_metrics(
+        preds, pred_trajs, gt_preds, pad_fut, config["num_preds"])
     ax.text(x_max, y_min, "b_ade1:{:.3f}\nb_fde1:{:.3f}\nade1: {:.3f}\nfde1: {:.3f}\nade6: {:.3f}\nfde6: {:.3f}".
             format(base_ade1, base_fde1, ade1, fde1, ade, fde),
             fontsize=15, horizontalalignment="right", verticalalignment="bottom")
-    if len(idx) > 0:
-        ax.scatter(preds[idx, -1, 0], preds[idx, -1, 1], marker="X", c="b", s=20, zorder=20, alpha=1,
-                   label="Predicted goal (model)")
-        ax.text(preds[idx, -1, 0], preds[idx, -1, 1], str("%d" % probabilities[idx]), fontsize=8, alpha=1,
+
+    preds = preds[pad_fut[:, config["num_preds"] - 1]]
+    for i, idx in enumerate(min_ids):
+        ax.scatter(preds[i, idx, -1, 0], preds[i, idx, -1, 1], marker="X", c="b", s=20, zorder=20, alpha=1)
+        ax.text(preds[i, idx, -1, 0], preds[i, idx, -1, 1], str("%d" % probabilities[i, idx]), fontsize=8, alpha=1,
                 horizontalalignment="center", verticalalignment="bottom")
 
-    ax.legend(loc="upper right", shadow=True)
-
     if save:
-        plt.savefig(config["images"] + str("%d_%.3f" % (num, fde)) + '.png', dpi=250)
+        plt.savefig(config["images"] + str("%d_base_%.3f" % (num, fde)) + '.png', dpi=250)
     if show:
         plt.show()

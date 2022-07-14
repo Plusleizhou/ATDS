@@ -19,7 +19,7 @@ def parse_args():
     parser.add_argument('--num_preds', default=30, type=int, help="the number of prediction frames")
     parser.add_argument('--devices', default='0', type=str, help='gpu devices for training')
     parser.add_argument('--viz', action="store_true", default=False, help='whether to visualize the prediction')
-    parser.add_argument('--mode', default='ego', type=str, help='ego/seq')
+    parser.add_argument('--mode', default='ego', type=str, help='ego/seq/base')
     args = parser.parse_args()
 
     # update config
@@ -34,15 +34,19 @@ def parse_args():
 
 
 def loader(args):
-    assert args.mode in ["ego", "seq"]
+    assert args.mode in ["ego", "seq", "base"]
     if args.mode == "ego":
         from utils import visualization
         from processed_data import ProcessedDataset
         from utils import PostProcess
-    else:
+    elif args.mode == "seq":
         from tools.seq_utils import visualization
         from processed_data import SeqProcessedDataset as ProcessedDataset
         from tools.seq_utils import SeqPostProcess as PostProcess
+    else:
+        from tools.base_utils import visualization
+        from processed_data import BaseProcessedDataset as ProcessedDataset
+        from tools.base_utils import BasePostProcess as PostProcess
     return visualization, ProcessedDataset, PostProcess
 
 
