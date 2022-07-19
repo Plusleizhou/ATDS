@@ -46,6 +46,10 @@ def get_args():
                         required=True,
                         type=str,
                         help="train/val/test")
+    parser.add_argument("--ego_lead",
+                        default=False,
+                        action="store_true",
+                        help="Build dataset for ego lead")
     parser.add_argument("--plus",
                         default=False,
                         action="store_true",
@@ -98,8 +102,19 @@ class PlusPreproc(object):
             "NOT_SET": 4
         }
 
+        self.ego_lane_presence = {
+            "NOT_IN_EGOLANE": 0,
+            "IN_EGOLANE": 1,
+            "IN_EGOLANE_LEAD_VEHICLE": 2,
+            "IN_RIGHT_SHOULDER": 3,
+            "IN_RIGHT_SHOULDER_LEAD_VEHICLE": 4,
+            "IN_LEFT_SHOULDER": 5,
+            "IN_LEFT_SHOULDER_LEAD_VEHICLE": 6,
+            "ON_ROAD": 7,
+        }
+
         self.columns = ["TIMESTAMP", "FRAMES", "TRACK_ID", "OBJECT_TYPE", "X", "Y", "V", "YAW", "EGO_RELATION",
-                        "HAS_PREDS", "PRED_TRAJ"]
+                        "HAS_PREDS", "PRED_TRAJ", "EGO_LANE_PRESENCE"]
 
         self.det_type = {
             "DONTCARE": 0,
@@ -155,7 +170,7 @@ class PlusPreproc(object):
                 continue
 
             agent = df[df["OBJECT_TYPE"] == self.det_type["AGENT"]]
-            if agent.shape[0] < self.args.obs_len + self.args.pred_len:
+            if agent.shape[0] != self.args.obs_len + self.args.pred_len:
                 continue
 
             file_name = os.path.basename(bag_path).split(".")[0] + "_" + str(observed_frame) + "_" + str(self.ego_id)
@@ -168,11 +183,12 @@ class PlusPreproc(object):
                     df.to_pickle(save_dir)
                 continue
 
-            # convert Plus data to Argo data
-            data, headers = self.convertor.process(file_name, df)
-
             if not self.args.debug and self.args.argo:
-                if os.path.abspath(self.args.save_dir):
+                # convert Plus data to Argo data
+                data, headers = self.convertor.process(file_name, df)
+                if np.all(data[0][-1] != 2) and self.args.ego_lead:
+                    continue
+                if os.path.isabs(self.args.save_dir):
                     save_dir = os.path.join(self.args.save_dir, self.args.mode, file_name + "_argo" + ".pkl")
                 else:
                     save_dir = os.path.join(os.getcwd(),
@@ -203,7 +219,7 @@ class PlusPreproc(object):
                     if len(odom) > 0:
                         obs_list.append(
                             [ts, obs_num, self.ego_id, self.det_type["AV"], odom[0], odom[1], odom[2], odom[3],
-                             self.ego_relation["EGO"], False, None])
+                             self.ego_relation["EGO"], False, None, self.ego_lane_presence["IN_EGOLANE"]])
 
                     # lane
                     if lane_msg is not None and len(lane_msg.lane) > 0:
@@ -244,7 +260,7 @@ class PlusPreproc(object):
                                     point = lane_points[i]
                                     lane_list.append(
                                         [ts, obs_num, lane_id, self.det_type["CENTER_LANE"], point.x, point.y, 0, 0,
-                                         ego_relation, None, None])
+                                         ego_relation, None, None, None])
 
                             for segment in lane.left_boundary.curve.segment:
                                 lane_points = segment.line_segment.point
@@ -259,7 +275,7 @@ class PlusPreproc(object):
                                     point = lane_points[i]
                                     lane_list.append(
                                         [ts, obs_num, lane_id, self.det_type["LEFT_BOUNDARY"], point.x, point.y, 0, 0,
-                                         ego_relation, None, None])
+                                         ego_relation, None, None, None])
 
                             for segment in lane.right_boundary.curve.segment:
                                 lane_points = segment.line_segment.point
@@ -274,7 +290,7 @@ class PlusPreproc(object):
                                     point = lane_points[i]
                                     lane_list.append(
                                         [ts, obs_num, lane_id, self.det_type["RIGHT_BOUNDARY"], point.x, point.y, 0, 0,
-                                         ego_relation, None, None])
+                                         ego_relation, None, None, None])
 
                     # obstacle step 2: obtain info of surrounding agents
                     pred_obs = msg.prediction_obstacle
@@ -297,7 +313,7 @@ class PlusPreproc(object):
                         v = math.sqrt(obs.motion.vx * obs.motion.vx + obs.motion.vy * obs.motion.vy)
                         obs_list.append(
                             [ts, obs_num, obs.id, obs.type, obs.motion.x, obs.motion.y, v, obs.motion.yaw,
-                             pred_ob.ego_relation, has_preds, pred_traj])
+                             pred_ob.ego_relation, has_preds, pred_traj, obs.ego_lane_presence])
 
                 if topic_name == "/perception/lane_path":
                     lane_msg = msg

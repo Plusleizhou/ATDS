@@ -1,11 +1,16 @@
 import os
 import copy
 import argparse
+import time
+import multiprocessing
+
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 from shapely.geometry import LineString, Point
 from scipy import sparse, spatial
+from tqdm import tqdm
+from joblib import Parallel, delayed
 
 
 class PreProcess(object):
@@ -48,14 +53,15 @@ class PreProcess(object):
 
     def process(self, seq_id, df):
         # get trajectories
-        ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds = self.get_trajectories(df)
+        ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds, ego_lane_presence = self.get_trajectories(df)
 
         # build lane graph
         graph = self.get_lane_graph(df, orig, rot)
 
         # save data
-        data = [[seq_id, orig, rot, ts, trajs, pad_flags, graph, has_preds, pred_trajs]]
-        headers = ["SEQ_ID", "ORIG", "ROT", "TIMESTAMP", "TRAJS", "PAD_FLAGS", "GRAPH", "HAS_PREDS", "PRED_TRAJS"]
+        data = [[seq_id, orig, rot, ts, trajs, pad_flags, graph, has_preds, pred_trajs, ego_lane_presence]]
+        headers = ["SEQ_ID", "ORIG", "ROT", "TIMESTAMP", "TRAJS", "PAD_FLAGS", "GRAPH", "HAS_PREDS", "PRED_TRAJS",
+                   "EGO_LANE_PRESENCE"]
 
         # for debug
         if self.args.debug and self.args.viz:
@@ -79,8 +85,12 @@ class PreProcess(object):
 
         trajs, pad_flags = [], []
         pred_trajs, has_preds = [], [False]
+        ego_lane_presence = []
 
         agent_traj = df[df["OBJECT_TYPE"] == self.det_type["AGENT"]]
+        agent_traj_obs = agent_traj[agent_traj["TIMESTAMP"] == t_obs]
+        ego_lane_presence.append(agent_traj_obs["EGO_LANE_PRESENCE"].values[0])
+
         agent_traj = np.stack((agent_traj["X"].values, agent_traj["Y"].values), axis=1)
         agent_traj[:, :2] = agent_traj[:, :2]
         trajs.append(agent_traj)
@@ -105,6 +115,7 @@ class PreProcess(object):
                 has_preds.append(True)
             else:
                 has_preds.append(False)
+            ego_lane_presence.append(sur_traj_obs["EGO_LANE_PRESENCE"].values[0])
 
             sur_traj = np.stack((sur_traj["X"].values, sur_traj["Y"].values), axis=1)
             _, ids, _ = np.intersect1d(ts, ts_sur, return_indices=True)
@@ -138,8 +149,9 @@ class PreProcess(object):
         ts = (ts - ts[0]).astype(np.float32)
         trajs = trajs.astype(np.float32)
         pad_flags = np.array(pad_flags).astype(np.int16)
+        ego_lane_presence = np.array(ego_lane_presence).astype(np.int16)
 
-        return ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds
+        return ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds, ego_lane_presence
 
     def get_origin_rotation(self, agent_traj):
         orig = agent_traj[self.args.obs_len - 1]
@@ -455,6 +467,14 @@ def get_args():
                         type=str,
                         default="./data/processed/",
                         help="Path to the pkl file for extracting data")
+    parser.add_argument("-s", "--save_dir",
+                        default="./data/features/",
+                        type=str,
+                        help="Path where the computed features are saved")
+    parser.add_argument("-m", "--mode",
+                        required=True,
+                        type=str,
+                        help="train/val/test")
     parser.add_argument("--obs_len",
                         default=20,
                         type=int,
@@ -464,25 +484,58 @@ def get_args():
                         type=int,
                         help="Prediction Horizon")
     parser.add_argument("--debug",
-                        default=True,
+                        default=False,
                         action="store_true",
                         help="If true, debug mode.")
     parser.add_argument("--viz",
-                        default=True,
+                        default=False,
                         action="store_true",
                         help="If true, viz.")
+    parser.add_argument("--ego_lead",
+                        default=False,
+                        action="store_true",
+                        help="Build dataset for ego lead")
 
     return parser.parse_args()
 
 
-if __name__ == "__main__":
+def save_as_argo(dataset, files, start_idx, batch_size, args):
+    loop = tqdm(range(batch_size), total=batch_size, leave=True)
+    for i in loop:
+        if i + start_idx < len(files):
+            file = files[start_idx + i]
+            scenario = pd.read_pickle(os.path.join(args.file_dir, file))
+            file_name = file.split('.')[0][:-5]
+            data, headers = dataset.process(file_name, scenario)
+            if np.all(data[0][-1] != 2) and args.ego_lead:
+                continue
+            if os.path.isabs(args.save_dir):
+                save_dir = os.path.join(args.save_dir, args.mode, file_name + "_argo" + ".pkl")
+            else:
+                save_dir = os.path.join(os.getcwd(), args.save_dir, args.mode, file_name + "_argo" + ".pkl")
+            if not os.path.exists(save_dir) and not args.debug:
+                data_df = pd.DataFrame(data, columns=headers)
+                data_df.to_pickle(save_dir)
+
+
+def main():
+    start = time.time()
+
     args = get_args()
     dataset = PreProcess(args)
-    dir_path = os.path.join(os.getcwd(), args.file_dir)
-    files = sorted(os.listdir(dir_path), key=lambda x: int(x.split(".")[0].split("_")[-3]) +
-                                                       len(os.listdir(dir_path)) * int(x.split(".")[0].split("_")[-2]))
-    for i, file in enumerate(files):
-        if i <= 355 - 19:
-            continue
-        scenario = pd.read_pickle(os.path.join(dir_path, file))
-        print(dataset.process(file, scenario))
+
+    files = os.listdir(args.file_dir)
+    num_files = len(files)
+    print("num of files: ", num_files)
+
+    n_proc = multiprocessing.cpu_count() - 2 if not args.debug else 1
+    batch_size = np.max([int(np.ceil(num_files / float(n_proc))), 1])
+    print('n_proc: {}, batch_size: {}'.format(n_proc, batch_size))
+
+    Parallel(n_jobs=n_proc)(delayed(save_as_argo)(dataset, files, i, batch_size, args)
+                            for i in range(0, num_files, batch_size))
+    print("Preprocess for {} set completed in {} minutes".format(args.file_dir, (time.time() - start) / 60.0))
+
+
+if __name__ == "__main__":
+    main()
