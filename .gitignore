@@ -15,7 +15,6 @@ results/log-*
 
 # onnx
 *.onnx
-convert_to_onnx.py
 
 # weights
 *.pth
