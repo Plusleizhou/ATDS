@@ -182,6 +182,84 @@ class BaseProcessedDataset(Dataset):
         return data
 
 
+class LeadProcessedDataset(Dataset):
+    def __init__(self, path, mode="val"):
+        super(LeadProcessedDataset, self).__init__()
+        self.path = path
+        self.mode = mode
+        self.train = False
+        if self.mode == "train":
+            self.train = True
+        file_list = os.listdir(path)
+        file_list.sort(key=lambda x: int(x.split(".")[0].split("_")[-3]) +
+                                                       len(file_list) * int(x.split(".")[0].split("_")[-2]))
+        self.file_list = file_list
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, item):
+        file = self.file_list[item]
+        df = pd.read_pickle(os.path.join(self.path, file))
+        # "SEQ_ID", "ORIG", "ROT", "TIMESTAMP", "TRAJS", "PAD_FLAGS", "GRAPH"
+        df_dict = {}
+        for key in list(df.keys()):
+            df_dict[key] = df[key].values[0]
+
+        seq_id = df_dict["SEQ_ID"]
+        orig = df_dict["ORIG"]
+        rot = df_dict["ROT"]
+        ts = df_dict["TIMESTAMP"]
+
+        trajs = df_dict["TRAJS"]
+
+        pad_flags = df_dict["PAD_FLAGS"]
+        pad_obs = pad_flags[:, :config["num_obs"]]
+        pad_fut = pad_flags[:, config["num_obs"]:]
+
+        has_preds = df_dict["HAS_PREDS"]
+        pred_trajs = df_dict["PRED_TRAJS"]
+        ego_lane_presence = df_dict["EGO_LANE_PRESENCE"]
+
+        graph = df_dict["GRAPH"]
+
+        update_mask = (np.abs(trajs[:, config["num_obs"] - 1, 0]) < 100) * \
+                      (np.abs(trajs[:, config["num_obs"] - 1, 1]) < 7)
+
+        # # use ego_lead as orig
+        # idx = np.argwhere(ego_lane_presence == 2)[0, 0]
+        # # transform from agent coordinate to other vehicle coordinate
+        # orig = trajs[idx, config["num_obs"] - 1]
+        # vec = orig - trajs[idx, 0]
+        # theta = np.arctan2(vec[1], vec[0])
+        # rot = np.array([[np.cos(theta), -np.sin(theta)],
+        #                 [np.sin(theta), np.cos(theta)]])
+        # trajs = (np.asarray(trajs) - orig).dot(rot)
+        # pred_trajs = (np.asarray(pred_trajs) - orig).dot(rot)
+        # graph["ctrs"] = (np.asarray(graph["ctrs"]) - orig).dot(rot)
+        # graph["feats"] = (np.asarray(graph["feats"])).dot(rot)
+        # # transform from vehicle coordinate to world coordinate
+        # orig = np.matmul(orig, df_dict["ROT"]) + df_dict["ORIG"]
+        # rot = np.matmul(rot, df_dict["ROT"])
+
+        data = {
+            "seq_id": seq_id,
+            "orig": orig,
+            "rot": rot,
+            "ts": np.diff(ts, prepend=ts[0])[:config["num_obs"]],
+            "trajs_obs": trajs[:, :config["num_obs"]],
+            "pad_obs": pad_obs,
+            "trajs_fut": trajs[:, config["num_obs"]:],
+            "pad_fut": pad_fut,
+            "graph": graph,
+            "has_preds": has_preds,
+            "pred_trajs": pred_trajs,
+            "update_mask": update_mask,
+            "ego_lane_presence": ego_lane_presence
+        }
+        return data
+
+
 def ref_copy(data):
     if isinstance(data, list):
         return [ref_copy(x) for x in data]
