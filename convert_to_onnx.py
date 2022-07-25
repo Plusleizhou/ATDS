@@ -1,4 +1,5 @@
 import os
+import argparse
 import torch
 import numpy as np
 import time
@@ -133,7 +134,22 @@ def run_onnx():
     np.testing.assert_allclose(to_numpy(torch_out["cls"][0]), ort_outs[0], rtol=1e-03, atol=1e-05)
 
 
+def get_args():
+    parser = argparse.ArgumentParser(description='Convert pytorch model to onnx model')
+    parser.add_argument('--to_onnx', action="store_true", default=False,
+                        help="whether to convert the pytorch model to onnx model")
+    parser.add_argument("--simplify", action="store_true", default=False,
+                        help="whether the simplify the onnx model")
+    parser.add_argument("--run", action="store_true", default=False, help="whether to use the model")
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    # convert()
-    simplify_onnx()
-    run_onnx()
+    args = get_args()
+    if args.to_onnx:
+        convert()
+    if args.simplify:
+        assert "atdsnet.onnx" in os.listdir(os.getcwd()), "convert the pytorch model to onnx model first"
+        simplify_onnx()
+    if args.run:
+        run_onnx()

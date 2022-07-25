@@ -41,6 +41,9 @@ class ProcessedDataset(Dataset):
         pad_flags = df_dict["PAD_FLAGS"]
         graph = df_dict["GRAPH"]
 
+        for key in ["intersect", "control", "turn"]:
+            graph[key] = graph[key].astype(np.float32)
+
         update_mask = (np.abs(trajs[:, config["num_obs"] - 1, 0]) < 100) * \
                       (np.abs(trajs[:, config["num_obs"] - 1, 1]) < 7)
 
@@ -66,9 +69,9 @@ class ProcessedDataset(Dataset):
             "rot": rot,
             "ts": np.diff(ts, prepend=ts[0])[:config["num_obs"]],
             "trajs_obs": trajs[:, :config["num_obs"]],
-            "pad_obs": pad_flags[:, :config["num_obs"]],
+            "pad_obs": pad_flags[:, :config["num_obs"]].astype(np.float32),
             "trajs_fut": trajs[:, config["num_obs"]:],
-            "pad_fut": pad_flags[:, config["num_obs"]:],
+            "pad_fut": pad_flags[:, config["num_obs"]:].astype(np.float32),
             "graph": graph,
             "update_mask": update_mask
         }
