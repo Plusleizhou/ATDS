@@ -1,6 +1,6 @@
 import torch
 from torch import nn
-from model.Layers import Linear, LinearRes
+from model.Layers import Linear, index_add_naive
 from einops import rearrange
 
 
@@ -15,14 +15,12 @@ class A2M(nn.Module):
             att.append(Att(n_map, config["n_agent"]))
         self.att = nn.ModuleList(att)
 
-    def forward(self, feat, graph, agents, agent_ids, agent_ctrs):
+    def forward(self, feat, ctrs, agents, agent_ctrs):
         for i in range(len(self.att)):
             feat = self.att[i](
                 feat,
-                graph["ids"],
-                graph["ctrs"],
+                ctrs,
                 agents,
-                agent_ids,
                 agent_ctrs,
                 self.config["agent2map_dist"],
             )
@@ -42,15 +40,12 @@ class M2A(nn.Module):
             att.append(Att(n_agent, n_map))
         self.att = nn.ModuleList(att)
 
-    def forward(self, agents, agent_ids, agent_ctrs, nodes,
-                node_ids, node_ctrs):
+    def forward(self, agents, agent_ctrs, nodes, node_ctrs):
         for i in range(len(self.att)):
             agents = self.att[i](
                 agents,
-                agent_ids,
                 agent_ctrs,
                 nodes,
-                node_ids,
                 node_ctrs,
                 self.config["map2agent_dist"],
             )
@@ -69,14 +64,12 @@ class A2A(nn.Module):
             att.append(Att(n_agent, n_agent))
         self.att = nn.ModuleList(att)
 
-    def forward(self, agents, agent_ids, agent_ctrs):
+    def forward(self, agents, agent_ctrs):
         for i in range(len(self.att)):
             agents = self.att[i](
                 agents,
-                agent_ids,
                 agent_ctrs,
                 agents,
-                agent_ids,
                 agent_ctrs,
                 self.config["agent2agent_dist"],
             )
@@ -111,37 +104,16 @@ class Att(nn.Module):
             nn.Linear(n_agt, n_agt, bias=False),
         )
 
-    def forward(self, agts, agt_ids, agt_ctrs, ctx, ctx_ids, ctx_ctrs, dist_th):
+    def forward(self, agts, agt_ctrs, ctx, ctx_ctrs, dist_th):
         res = agts
-        if len(ctx) == 0:
-            agts = self.agt(agts)
-            agts = self.relu(agts)
-            agts = self.linear(agts)
-            agts += res
-            agts = self.relu(agts)
-            return agts
 
-        batch_size = len(agt_ids)
-        hi, wi = [], []
-        hi_count, wi_count = 0, 0
-        for i in range(batch_size):
-            dist = agt_ctrs[i].view(-1, 1, 2) - ctx_ctrs[i].view(1, -1, 2)
-            dist = torch.sqrt((dist ** 2).sum(2))
-            mask = dist <= dist_th
+        dist = agt_ctrs.view(-1, 1, 2) - ctx_ctrs.view(1, -1, 2)
+        dist = torch.sqrt((dist ** 2).sum(2))
+        mask = dist <= dist_th
+        ids = torch.nonzero(mask, as_tuple=False)
+        hi = ids[:, 0]
+        wi = ids[:, 1]
 
-            ids = torch.nonzero(mask, as_tuple=False)
-            if len(ids) == 0:
-                continue
-
-            hi.append(ids[:, 0] + hi_count)
-            wi.append(ids[:, 1] + wi_count)
-            hi_count += len(agt_ids[i])
-            wi_count += len(ctx_ids[i])
-        hi = torch.cat(hi, 0)
-        wi = torch.cat(wi, 0)
-
-        agt_ctrs = torch.cat(agt_ctrs, 0)
-        ctx_ctrs = torch.cat(ctx_ctrs, 0)
         dist = agt_ctrs[hi] - ctx_ctrs[wi]
         dist = self.dist(dist)
 
@@ -159,7 +131,9 @@ class Att(nn.Module):
         out = self.to_out(out)
 
         agts = self.agt(agts)
-        agts.index_add_(0, hi, out)
+        # agts.index_add_(0, hi, out)
+        # agts.scatter_add_(0, hi.unsqueeze(1).repeat(1, 128), out)
+        agts = index_add_naive(agts, out, hi)
         agts = self.norm(agts)
         agts = self.relu(agts)
 

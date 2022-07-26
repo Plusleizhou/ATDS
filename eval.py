@@ -59,7 +59,7 @@ def main():
     visualization, ProcessedDataset, PostProcess = loader(args)
     dataset = ProcessedDataset(config["processed_val"], mode="val")
     val_dataloader = DataLoader(dataset,
-                                batch_size=config['val_batch_size'],
+                                batch_size=1,
                                 num_workers=config['val_workers'],
                                 shuffle=False,
                                 collate_fn=collate_fn)
@@ -85,7 +85,35 @@ def main():
     loop.set_postfix_str(f'total_loss="???", minFDE="???"')
     for i, batch in loop:
         with torch.no_grad():
-            out = net(batch)
+            dummy_input = list()
+            tmp = list()
+            for key in batch.keys():
+                if key in ["trajs_obs", "pad_obs"]:
+                    dummy_input.append(batch[key][0])
+                if key == "graph":
+                    graph = batch["graph"][0]
+
+                    dummy_input.append(graph["control"])
+
+                    for j in range(len(graph["pre"])):
+                        tmp.append((graph["pre"][j]["u"], graph["pre"][j]["v"]))
+                    dummy_input.append(tuple(tmp))
+
+                    dummy_input.append((graph["right"]["u"], graph["right"]["v"]))
+
+                    tmp = list()
+                    for j in range(len(graph["suc"])):
+                        tmp.append((graph["suc"][j]["u"], graph["suc"][j]["v"]))
+                    dummy_input.append(tuple(tmp))
+
+                    dummy_input.append(graph["turn"])
+                    dummy_input.append(graph["intersect"])
+                    dummy_input.append(graph["ctrs"])
+                    dummy_input.append(graph["feats"])
+                    dummy_input.append((graph["left"]["u"], graph["left"]["v"]))
+            out = net(*dummy_input)
+            for key in out.keys():
+                out[key] = [out[key]]
 
             # use key point
             if args.use_goal:

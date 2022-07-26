@@ -25,7 +25,33 @@ def get_dummy_input():
                                 shuffle=False,
                                 collate_fn=collate_fn)
     batch = val_dataloader.__iter__().next()
-    return batch
+    dummy_input = list()
+    tmp = list()
+    for key in batch.keys():
+        if key in ["trajs_obs", "pad_obs"]:
+            dummy_input.append(batch[key][0])
+        if key == "graph":
+            graph = batch["graph"][0]
+
+            dummy_input.append(graph["control"])
+
+            for i in range(len(graph["pre"])):
+                tmp.append((graph["pre"][i]["u"], graph["pre"][i]["v"]))
+            dummy_input.append(tuple(tmp))
+
+            dummy_input.append((graph["right"]["u"], graph["right"]["v"]))
+
+            tmp = list()
+            for i in range(len(graph["suc"])):
+                tmp.append((graph["suc"][i]["u"], graph["suc"][i]["v"]))
+            dummy_input.append(tuple(tmp))
+
+            dummy_input.append(graph["turn"])
+            dummy_input.append(graph["intersect"])
+            dummy_input.append(graph["ctrs"])
+            dummy_input.append(graph["feats"])
+            dummy_input.append((graph["left"]["u"], graph["left"]["v"]))
+    return tuple(dummy_input)
 
 
 def load_checkpoint(path, net):
@@ -53,8 +79,16 @@ def load_model():
 
 def convert():
     model = load_model()
-    input_names = ["input"]
-    output_names = ["output"]
+    input_names = ["trajs_obs", "pad_obs", "control",
+                   "pre_0_u", "pre_0_v", "pre_1_u", "pre_1_v", "pre_2_u", "pre_2_v",
+                   "pre_3_u", "pre_3_v", "pre_4_u", "pre_4_v", "pre_5_u", "pre_5_v",
+                   "right_u", "right_v",
+                   "suc_0_u", "suc_0_v", "suc_1_u", "suc_1_v", "suc_2_u", "suc_2_v",
+                   "suc_3_u", "suc_3_v", "suc_4_u", "suc_4_v", "suc_5_u", "suc_5_v",
+                   "turn", "intersect",
+                   "ctrs", "feats",
+                   "left_u", "left_v"]
+    output_names = ["cls", "reg", "key_points"]
 
     torch.onnx.export(model, get_dummy_input(), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
                       output_names=output_names)
@@ -80,15 +114,15 @@ def run_torch():
 
     dummy_input = get_dummy_input()
 
-    out = model(dummy_input)
+    out = model(*dummy_input)
     # print(model)
-    print(f"cls: {out['cls'][0].shape}, reg: {out['reg'][0].shape}, key_points: {out['key_points'][0].shape}")
-    print(out['cls'][0][0])
+    print(f"cls: {out['cls'].shape}, reg: {out['reg'].shape}, key_points: {out['key_points'].shape}")
+    print(out['cls'][0])
     return out
 
 
 def run_onnx():
-    ort_session = onnxruntime.InferenceSession("simple_atdsnet.onnx", providers=['TensorrtExecutionProvider',
+    ort_session = onnxruntime.InferenceSession("atdsnet.onnx", providers=['TensorrtExecutionProvider',
                                                                                  'CUDAExecutionProvider',
                                                                                  'CPUExecutionProvider'])
 
@@ -104,34 +138,54 @@ def run_onnx():
         return data
 
     dummy_input = to_numpy(get_dummy_input())
-    graph = dummy_input["graph"][0]
-    inputs = {"x.1": dummy_input["trajs_obs"][0], "x.3": dummy_input["pad_obs"][0], "_data.1": graph["control"],
-              "_data.5": graph["pre"][0]["u"], "_data.9": graph["pre"][0]["v"],
-              "_data.13": graph["pre"][1]["u"], "_data.17": graph["pre"][1]["v"],
-              "_data.21": graph["pre"][2]["u"], "_data.25": graph["pre"][2]["v"],
-              "_data.29": graph["pre"][3]["u"], "_data.33": graph["pre"][3]["v"],
-              "_data.37": graph["pre"][4]["u"], "_data.41": graph["pre"][4]["v"],
-              "_data.45": graph["pre"][5]["u"], "_data.49": graph["pre"][5]["v"],
-              "_data.53": graph["right"]["u"], "_data.57": graph["right"]["v"],
-              "_data.61": graph["suc"][0]["u"], "_data.65": graph["suc"][0]["v"],
-              "_data.69": graph["suc"][1]["u"], "_data.73": graph["suc"][1]["v"],
-              "_data.77": graph["suc"][2]["u"], "_data.81": graph["suc"][2]["v"],
-              "_data.85": graph["suc"][3]["u"], "_data.89": graph["suc"][3]["v"],
-              "_data.93": graph["suc"][4]["u"], "_data.97": graph["suc"][4]["v"],
-              "_data.101": graph["suc"][5]["u"], "_data.105": graph["suc"][5]["v"],
-              "_data.121": graph["turn"], "_data.125": graph["intersect"],
-              "_data.129": graph["ctrs"], "_data.133": graph["feats"],
-              "_data.137": graph["left"]["u"], "_data.141": graph["right"]["v"],
-              }
+    inputs = {
+        "trajs_obs": dummy_input[0],
+        "pad_obs": dummy_input[1],
+        # "control": dummy_input[2],
+        # "pre_0_u": dummy_input[3][0][0],
+        # "pre_0_v": dummy_input[3][0][1],
+        # "pre_1_u": dummy_input[3][1][0],
+        # "pre_1_v": dummy_input[3][1][1],
+        # "pre_2_u": dummy_input[3][2][0],
+        # "pre_2_v": dummy_input[3][2][1],
+        # "pre_3_u": dummy_input[3][3][0],
+        # "pre_3_v": dummy_input[3][3][1],
+        # "pre_4_u": dummy_input[3][4][0],
+        # "pre_4_v": dummy_input[3][4][1],
+        # "pre_5_u": dummy_input[3][5][0],
+        # "pre_5_v": dummy_input[3][5][1],
+        # "right_u": dummy_input[4][0],
+        # "right_v": dummy_input[4][1],
+        # "suc_0_u": dummy_input[5][0][0],
+        # "suc_0_v": dummy_input[5][0][1],
+        # "suc_1_u": dummy_input[5][1][0],
+        # "suc_1_v": dummy_input[5][1][1],
+        # "suc_2_u": dummy_input[5][2][0],
+        # "suc_2_v": dummy_input[5][2][1],
+        # "suc_3_u": dummy_input[5][3][0],
+        # "suc_3_v": dummy_input[5][3][1],
+        # "suc_4_u": dummy_input[5][4][0],
+        # "suc_4_v": dummy_input[5][4][1],
+        # "suc_5_u": dummy_input[5][5][0],
+        # "suc_5_v": dummy_input[5][5][1],
+        # "turn": dummy_input[6],
+        # "intersect": dummy_input[7],
+        # "ctrs": dummy_input[8],
+        # "feats": dummy_input[9],
+        # "left_u": dummy_input[10][0],
+        # "left_v": dummy_input[10][1],
+    }
     start_time = time.time()
     for i in range(100):
         ort_outs = ort_session.run(None, inputs)
+    print("onnx model results".center(50, "-"))
     print(f"Average time for inference once: {round((time.time() - start_time) * 10, 3)} ms")
     print([x.shape for x in ort_outs])
     print(ort_outs[0][0])
 
+    print("torch model results".center(50, "-"))
     torch_out = run_torch()
-    np.testing.assert_allclose(to_numpy(torch_out["cls"][0]), ort_outs[0], rtol=1e-03, atol=1e-05)
+    np.testing.assert_allclose(to_numpy(torch_out["cls"]), ort_outs[0], rtol=1e-03, atol=1e-05)
 
 
 def get_args():

@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from fractions import gcd
-from model.Layers import Linear
+from model.Layers import Linear, index_add_naive
 
 
 class MapEncoder(nn.Module):
@@ -49,29 +49,16 @@ class MapEncoder(nn.Module):
         self.fuse = nn.ModuleDict(fuse)
         self.relu = nn.ReLU(inplace=True)
 
-    def forward(self, graph):
-        if (
-            len(graph["feats"]) == 0
-            or len(graph["pre"][-1]["u"]) == 0
-            or len(graph["suc"][-1]["u"]) == 0
-        ):
-            temp = graph["feats"]
-            return (
-                temp.new().resize_(0),
-                [temp.new().long().resize_(0) for x in graph["node_idcs"]],
-                temp.new().resize_(0),
-            )
-
-        ctrs = torch.cat(graph["ctrs"], 0)
+    def forward(self, control, pre, right, suc, turn, intersect, ctrs, feats, left):
         feat = self.input(ctrs)
-        feat += self.seg(graph["feats"])
+        feat += self.seg(feats)
         feat = self.relu(feat)
 
         meta = torch.cat(
             (
-                graph["turn"],
-                graph["control"].unsqueeze(1),
-                graph["intersect"].unsqueeze(1),
+                turn,
+                control.unsqueeze(1),
+                intersect.unsqueeze(1),
             ),
             1,
         )
@@ -81,27 +68,31 @@ class MapEncoder(nn.Module):
         for i in range(len(self.fuse["ctr"])):
             temp = self.fuse["ctr"][i](feat)
             for key in self.fuse:
-                if key.startswith("pre") or key.startswith("suc"):
-                    k1 = key[:3]
-                    k2 = int(key[3:])
-                    temp.index_add_(
-                        0,
-                        graph[k1][k2]["u"],
-                        self.fuse[key][i](feat[graph[k1][k2]["v"]]),
+                if key.startswith("pre"):
+                    k1 = int(key[3:])
+                    temp = index_add_naive(
+                        temp,
+                        self.fuse[key][i](feat[pre[k1][1]]),
+                        pre[k1][0]
+                    )
+                if key.startswith("suc"):
+                    k1 = int(key[3:])
+                    temp = index_add_naive(
+                        temp,
+                        self.fuse[key][i](feat[suc[k1][1]]),
+                        suc[k1][0]
                     )
 
-            if len(graph["left"]["u"] > 0):
-                temp.index_add_(
-                    0,
-                    graph["left"]["u"],
-                    self.fuse["left"][i](feat[graph["left"]["v"]]),
-                )
-            if len(graph["right"]["u"] > 0):
-                temp.index_add_(
-                    0,
-                    graph["right"]["u"],
-                    self.fuse["right"][i](feat[graph["right"]["v"]]),
-                )
+            temp = index_add_naive(
+                temp,
+                self.fuse["left"][i](feat[left[1]]),
+                left[0]
+            )
+            temp = index_add_naive(
+                temp,
+                self.fuse["right"][i](feat[right[1]]),
+                right[0]
+            )
 
             feat = self.fuse["norm"][i](temp)
             feat = self.relu(feat)
@@ -110,4 +101,4 @@ class MapEncoder(nn.Module):
             feat += res
             feat = self.relu(feat)
             res = feat
-        return feat, graph["ids"], graph["ctrs"]
+        return feat, ctrs
