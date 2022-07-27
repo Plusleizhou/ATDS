@@ -14,10 +14,10 @@ class Net(nn.Module):
         self.config = config
 
         self.agent_encoder = AgentEncoder(config)
-        # self.map_encoder = MapEncoder(config)
+        self.map_encoder = MapEncoder(config)
 
-        # self.a2m = A2M(config)
-        # self.m2a = M2A(config)
+        self.a2m = A2M(config)
+        self.m2a = M2A(config)
         self.a2a = A2A(config)
 
         self.pyramid_decoder = PyramidDecoder(config)
@@ -29,13 +29,13 @@ class Net(nn.Module):
         agent_ctrs = get_agent_ctrs(d_agent_ctrs, agent_ctrs)
 
         # construct map features
-        # nodes, node_ctrs = self.map_encoder(gpu(control), to_long(gpu(pre)), to_long(gpu(right)),
-        #                                     to_long(gpu(suc)), gpu(turn), gpu(intersect), gpu(ctrs),
-        #                                     gpu(feats), to_long(gpu(left)))
+        nodes, node_ctrs = self.map_encoder(gpu(control), to_long(gpu(pre)), to_long(gpu(right)),
+                                            to_long(gpu(suc)), gpu(turn), gpu(intersect), gpu(ctrs),
+                                            gpu(feats), to_long(gpu(left)))
 
         # interactions
-        # nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs)
-        # agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs)
+        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs)
+        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs)
         agents = self.a2a(agents, agent_ctrs)
 
         # prediction

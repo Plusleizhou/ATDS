@@ -70,28 +70,48 @@ class MapEncoder(nn.Module):
             for key in self.fuse:
                 if key.startswith("pre"):
                     k1 = int(key[3:])
-                    temp = index_add_naive(
-                        temp,
+                    # temp = index_add_naive(
+                    #     temp,
+                    #     self.fuse[key][i](feat[pre[k1][1]]),
+                    #     pre[k1][0]
+                    # )
+                    temp.index_add_(
+                        0,
+                        pre[k1][0],
                         self.fuse[key][i](feat[pre[k1][1]]),
-                        pre[k1][0]
                     )
                 if key.startswith("suc"):
                     k1 = int(key[3:])
-                    temp = index_add_naive(
-                        temp,
+                    # temp = index_add_naive(
+                    #     temp,
+                    #     self.fuse[key][i](feat[suc[k1][1]]),
+                    #     suc[k1][0]
+                    # )
+                    temp.index_add_(
+                        0,
+                        suc[k1][0],
                         self.fuse[key][i](feat[suc[k1][1]]),
-                        suc[k1][0]
                     )
 
-            temp = index_add_naive(
-                temp,
+            # temp = index_add_naive(
+            #     temp,
+            #     self.fuse["left"][i](feat[left[1]]),
+            #     left[0]
+            # )
+            temp.index_add_(
+                0,
+                left[0],
                 self.fuse["left"][i](feat[left[1]]),
-                left[0]
             )
-            temp = index_add_naive(
-                temp,
+            # temp = index_add_naive(
+            #     temp,
+            #     self.fuse["right"][i](feat[right[1]]),
+            #     right[0]
+            # )
+            temp.index_add_(
+                0,
+                right[0],
                 self.fuse["right"][i](feat[right[1]]),
-                right[0]
             )
 
             feat = self.fuse["norm"][i](temp)
