@@ -124,7 +124,7 @@ class BaseProcessedDataset(Dataset):
         pad_fut = pad_flags[:, config["num_obs"]:]
 
         has_preds = df_dict["HAS_PREDS"]
-        pred_trajs = df_dict["PRED_TRAJS"]
+        pred_trajs = df_dict["PRED_TRAJS"].astype(np.float32)
 
         graph = df_dict["GRAPH"]
 
@@ -187,7 +187,7 @@ class LeadProcessedDataset(Dataset):
         pad_fut = pad_flags[:, config["num_obs"]:]
 
         has_preds = df_dict["HAS_PREDS"]
-        pred_trajs = df_dict["PRED_TRAJS"]
+        pred_trajs = df_dict["PRED_TRAJS"].astype(np.float32)
         ego_lane_presence = df_dict["EGO_LANE_PRESENCE"]
 
         graph = df_dict["GRAPH"]

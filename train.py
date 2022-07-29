@@ -49,7 +49,7 @@ def worker_init_fn(pid):
     random.seed(random_seed)
 
 
-def val(data_loader, net, loss_net, rank=0):
+def val(data_loader, net, loss_net, vis=visualization, post_process=PostProcess, rank=0):
     net.eval()
     metrics = dict()
     loop = tqdm(enumerate(data_loader), total=len(data_loader), desc="Val", leave=False, disable=rank)
@@ -57,10 +57,10 @@ def val(data_loader, net, loss_net, rank=0):
         with torch.no_grad():
             out = net(batch)
             loss_out = loss_net(out, batch)
-            post_out = PostProcess(out, batch)
+            post_out = post_process(out, batch)
             post_out.append(metrics, loss_out)
             if (i + 1) % 100 == 0:
-                visualization(out, batch, i, True, False)
+                vis(out, batch, i, True, False)
     val_out = post_out.display(metrics)
     net.train()
     return val_out

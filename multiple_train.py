@@ -8,12 +8,11 @@ import torch
 from torch.utils.data import DataLoader
 from load_config import config
 import torch.optim as optim
-import time
 from model.Net import Net
 from model.Net import Loss
-from utils import PostProcess, gpu
 from train import val, vis_visualization
-from processed_data import ProcessedDataset, collate_fn
+from eval import loader
+from processed_data import collate_fn
 from utils import create_dirs, save_log
 import os
 import warnings
@@ -32,6 +31,7 @@ def parse_args():
     parser.add_argument('--devices', default='0', type=str, help='gpu devices for training')
     parser.add_argument('--env', default='main', type=str, help='visdom env name')
     parser.add_argument('--record', action="store_true", default=False, help='whether to record the running log')
+    parser.add_argument('--mode', default='ego', type=str, help='ego/seq/base/ego_lead')
     args = parser.parse_args()
 
     # update config
@@ -84,6 +84,7 @@ def init_seeds(seed=0):
 
 def main():
     args = parse_args()
+    visualization, ProcessedDataset, PostProcess = loader(args)
     local_rank = int(os.environ["LOCAL_RANK"])
     dist.init_process_group(backend='nccl')
     torch.cuda.set_device(local_rank)
@@ -192,7 +193,7 @@ def main():
                                       f'minFDE={train_out["fde"]:.3f}')
             save_log(epoch, train_out)
         if round(epoch) % config['num_val'] == 0:
-            val_out = val(val_dataloader, net, loss_net, dist.get_rank())
+            val_out = val(val_dataloader, net, loss_net, visualization, PostProcess, dist.get_rank())
             save_log(epoch, val_out, True)
 
 
