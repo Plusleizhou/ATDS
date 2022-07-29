@@ -52,14 +52,17 @@ class SelectionDataset(Dataset):
         if not np.all(np.argmax(pad_obs, axis=1) >= np.argmin(pad_obs, axis=1)) or not np.all(pad_obs[:, -2]):
             return sum([len(v) for k, v in self.selected_files.items()]), seq_id
 
-        feats = np.zeros_like(trajs_obs)
-        feats[:, 1:] = trajs_obs[:, 1:] - trajs_obs[:, :-1]
-        feats = np.concatenate([feats, np.expand_dims(pad_obs, 2)], axis=-1)
-        feats[:, :, :2] *= feats[:, :, -1:]
-        feats[:, 1:, :2] *= feats[:, :-1, -1:]
-        speed = feats.sum(1) / (feats[:, :, -1:].sum(1) - 1 + 1e-10)
+        feats = np.zeros_like(trajs_obs[:, :, :2])
+        feats[:, 1:] = trajs_obs[:, 1:, :2] - trajs_obs[:, :-1, :2]
+        pad_obs = np.expand_dims(pad_obs, 2)
 
-        trajs_pred = np.repeat(trajs_obs[:, -1:], self.num_preds, axis=1)
+        feats[:, :, :2] *= pad_obs
+        feats[:, 1:, :2] *= pad_obs[:, :-1]
+        pos_speed = feats.sum(1) / (pad_obs.sum(1) - 1 + 1e-10)
+        det_speed = (trajs_obs[:, :, 2:4] * pad_obs).sum(1) / (pad_obs.sum(1) + 1e-10)
+        speed = (pos_speed + det_speed / 10.0) / 2.0
+
+        trajs_pred = np.repeat(trajs_obs[:, -1:, :2], self.num_preds, axis=1)
         for i in range(self.num_preds):
             trajs_pred[:, i] = trajs_pred[:, i] + speed[:, :2] * (i + 1)
 
@@ -72,7 +75,7 @@ class SelectionDataset(Dataset):
         last_ids = last_ids[mask]
 
         row_ids = np.arange(len(last_ids)).astype(np.int16)
-        dist = np.sqrt(((trajs_pred[row_ids, last_ids] - trajs_fut[row_ids, last_ids]) ** 2).sum(1))
+        dist = np.sqrt(((trajs_pred[row_ids, last_ids] - trajs_fut[row_ids, last_ids, :2]) ** 2).sum(1))
 
         if dist.mean() <= 2.0:
             self.selected_files["2"].append(seq_id)

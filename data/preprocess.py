@@ -51,91 +51,96 @@ class PreProcess(object):
             "NOT_SET": 4
         }
 
-    def process(self, seq_id, df):
+    def process(self, seq_id, df, start_frame):
         # get trajectories
-        ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds, ego_lane_presence = self.get_trajectories(df)
+        ts, trajs, pad_flags, orig, rot, \
+            pred_trajs, has_preds, ego_lane_presence, agent_ids = self.get_trajectories(df, start_frame)
 
         # build lane graph
         graph = self.get_lane_graph(df, orig, rot)
 
+        # convert to np.float32
+        orig = orig.astype(np.float32)
+        rot = rot.astype(np.float32)
+
         # save data
-        data = [[seq_id, orig, rot, ts, trajs, pad_flags, graph, has_preds, pred_trajs, ego_lane_presence]]
+        data = [[seq_id, orig, rot, ts, trajs, pad_flags, graph, has_preds, pred_trajs, ego_lane_presence, agent_ids]]
         headers = ["SEQ_ID", "ORIG", "ROT", "TIMESTAMP", "TRAJS", "PAD_FLAGS", "GRAPH", "HAS_PREDS", "PRED_TRAJS",
-                   "EGO_LANE_PRESENCE"]
+                   "EGO_LANE_PRESENCE", "AGENT_IDS"]
 
         # for debug
         if self.args.debug and self.args.viz:
             _, ax = plt.subplots(figsize=(10, 10))
             ax.axis("equal")
             vis_map = True  # whether to visualize map with trajectories
-            self.plot_trajs(ax, trajs, pad_flags, orig, rot, vis_map=vis_map)
+            self.plot_trajs(ax, trajs[:, :, :2], pad_flags, orig, rot, vis_map=vis_map)
             self.plot_lane_graph(ax, df, graph, orig, rot, vis_map=vis_map)
             ax.set_title(seq_id)
             plt.show()
 
         return data, headers
 
-    def get_trajectories(self, df):
-        all_type = [self.det_type["CAR"], self.det_type["TRUCK"], self.det_type["SUV"], self.det_type["LIGHTTRUCK"],
-                    self.det_type["AGENT"]]
+    def get_trajectory(self, df_agent, ts_agent, ts, t_obs, trajs, pad_flags, pred_trajs, has_preds, ego_lane_presence):
+        df_agent_obs = df_agent[df_agent["TIMESTAMP"] == t_obs]
+        pred_traj = df_agent_obs["PRED_TRAJ"].values[0]
+        if np.all(df_agent_obs["HAS_PREDS"].values) and pred_traj.shape[0] >= 30:
+            pred_trajs.append(pred_traj)
+            has_preds.append(True)
+        else:
+            has_preds.append(False)
+        ego_lane_presence.append(df_agent_obs["EGO_LANE_PRESENCE"].values[0])
+
+        traj = np.stack((df_agent["X"].values, df_agent["Y"].values,
+                         df_agent["VX"].values, df_agent["VY"].values, df_agent["YAW"].values), axis=1)
+        _, ids, _ = np.intersect1d(ts, ts_agent, return_indices=True)
+        padded = np.zeros_like(ts)
+        padded[ids] = 1
+
+        traj_pad = np.full((ts.shape[0], traj.shape[1]), None)
+        traj_pad[ids] = traj
+        traj_pad = self.padding_traj_nn(traj_pad)
+        assert np.all(traj_pad[ids] == traj), "Padding error"
+
+        traj = np.stack((traj_pad[:, 0], traj_pad[:, 1], traj_pad[:, 2], traj_pad[:, 3], traj_pad[:, 4]), axis=1)
+        traj[:, :5] = traj[:, :5]
+        trajs.append(traj)
+        pad_flags.append(padded)
+
+    def get_trajectories(self, df, start_frame):
+        all_type = [self.det_type[k] for k in (set(self.det_type.keys()) - {"LEFT_BOUNDARY", "CENTER_LANE",
+                                                                            "RIGHT_BOUNDARY", "CONE", "MOVABLE_SIGN",
+                                                                            "LICENSE_PLATE"})]
         df = df.query("OBJECT_TYPE in @all_type")
 
-        ts = np.sort(np.unique(df["TIMESTAMP"].values)).astype(np.float64)
+        ts = np.arange(start_frame, start_frame + self.args.obs_len + self.args.pred_len)
         t_obs = ts[self.args.obs_len - 1]
 
         trajs, pad_flags = [], []
-        pred_trajs, has_preds = [], [False]
-        ego_lane_presence = []
-
-        agent_traj = df[df["OBJECT_TYPE"] == self.det_type["AGENT"]]
-        agent_traj_obs = agent_traj[agent_traj["TIMESTAMP"] == t_obs]
-        ego_lane_presence.append(agent_traj_obs["EGO_LANE_PRESENCE"].values[0])
-
-        agent_traj = np.stack((agent_traj["X"].values, agent_traj["Y"].values), axis=1)
-        agent_traj[:, :2] = agent_traj[:, :2]
-        trajs.append(agent_traj)
-        pad_flags.append(np.ones_like(ts))
+        pred_trajs, has_preds = [], []
+        ego_lane_presence, agent_ids = [], []
 
         track_ids = np.unique(df["TRACK_ID"].values)
+        # collect ego info
+        df_ego = df[df["TRACK_ID"] == -1]
+        ts_ego = np.array(df_ego["TIMESTAMP"].values).astype(np.int64)
+        self.get_trajectory(df_ego, ts_ego, ts, t_obs, trajs, pad_flags, pred_trajs, has_preds, ego_lane_presence)
+        agent_ids.append(-1)
+        # collect obs info
         for idx in track_ids:
-            sur_traj = df[df["TRACK_ID"] == idx]
-            if np.all(sur_traj["OBJECT_TYPE"] == self.det_type["AGENT"]):
+            df_agent = df[df["TRACK_ID"] == idx]
+            if np.all(df_agent["OBJECT_TYPE"] == self.det_type["AV"]) and np.all(df_agent["TRACK_ID"] == -1):
                 continue
 
-            ts_sur = np.array(sur_traj["TIMESTAMP"].values).astype(np.float64)
-
-            if np.all(ts_sur > t_obs) or t_obs not in ts_sur:
+            ts_agent = np.array(df_agent["TIMESTAMP"].values).astype(np.int64)
+            if np.all(ts_agent > t_obs) or t_obs not in ts_agent:
                 continue
 
-            # predicted trajectory by relu-based method
-            sur_traj_obs = sur_traj[sur_traj["TIMESTAMP"] == t_obs]
-            pred_traj = sur_traj_obs["PRED_TRAJ"].values[0]
-            if np.all(sur_traj_obs["HAS_PREDS"].values) and pred_traj.shape[0] >= 30:
-                pred_trajs.append(pred_traj)
-                has_preds.append(True)
-            else:
-                has_preds.append(False)
-            ego_lane_presence.append(sur_traj_obs["EGO_LANE_PRESENCE"].values[0])
-
-            sur_traj = np.stack((sur_traj["X"].values, sur_traj["Y"].values), axis=1)
-            _, ids, _ = np.intersect1d(ts, ts_sur, return_indices=True)
-            padded = np.zeros_like(ts)
-            padded[ids] = 1
-
-            sur_traj_pad = np.full(agent_traj[:, :2].shape, None)
-            sur_traj_pad[ids] = sur_traj
-            sur_traj_pad = self.padding_traj_nn(sur_traj_pad)
-            assert np.all(sur_traj_pad[ids] == sur_traj), "Padding error"
-
-            sur_traj = np.stack((sur_traj_pad[:, 0], sur_traj_pad[:, 1]), axis=1)
-            sur_traj[:, :2] = sur_traj[:, :2]
-            trajs.append(sur_traj)
-            pad_flags.append(padded)
+            self.get_trajectory(df_agent, ts_agent, ts, t_obs,
+                                trajs, pad_flags, pred_trajs, has_preds, ego_lane_presence)
+            agent_ids.append(idx)
 
         # transform
-        orig, rot = self.get_origin_rotation(agent_traj)
-        orig = orig.astype(np.float32)
-        rot = rot.astype(np.float32)
+        orig, rot = self.get_origin_rotation(trajs[0][:, :2])
 
         # predicted trajectory by relu-based method
         if len(pred_trajs) > 0:
@@ -144,14 +149,17 @@ class PreProcess(object):
             pred_trajs = np.zeros((0, 50, 2))
         has_preds = np.asarray(has_preds).astype(np.int16)
 
-        trajs = (np.asarray(trajs) - orig).dot(rot)
+        trajs = np.asarray(trajs, dtype=np.float_)
+        trajs[:, :, :2] = (trajs[:, :, :2] - orig).dot(rot)
+        trajs[:, :, 2:4] = trajs[:, :, 2:4].dot(rot)
 
         ts = (ts - ts[0]).astype(np.float32)
         trajs = trajs.astype(np.float32)
         pad_flags = np.array(pad_flags).astype(np.int16)
         ego_lane_presence = np.array(ego_lane_presence).astype(np.int16)
+        agent_ids = np.array(agent_ids).astype(np.int16)
 
-        return ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds, ego_lane_presence
+        return ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds, ego_lane_presence, agent_ids
 
     def get_origin_rotation(self, agent_traj):
         orig = agent_traj[self.args.obs_len - 1]
@@ -209,8 +217,8 @@ class PreProcess(object):
             lane = lanes[lanes["TRACK_ID"] == lane_id]
             lane_cl = np.stack((lane["X"].values, lane["Y"].values), axis=1)
             lane_cl[:, :2] = (lane_cl[:, :2] - orig).dot(rot)
-            ctrs.append(np.asarray((lane_cl[1:] + lane_cl[:-1]) / 2.0, np.float32))
-            feats.append(np.asarray((lane_cl[1:] - lane_cl[:-1]), np.float32))
+            ctrs.append(np.asarray((lane_cl[1:] + lane_cl[:-1]) / 2.0, np.float_))
+            feats.append(np.asarray((lane_cl[1:] - lane_cl[:-1]), np.float_))
 
             x = np.ones((len(ctrs[-1]), 2), np.float32)
             x[:, 0] *= left_turn[i]

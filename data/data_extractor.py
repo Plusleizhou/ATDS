@@ -8,6 +8,7 @@ import time
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
+from collections import defaultdict
 from joblib import Parallel, delayed
 import multiprocessing
 from matplotlib import pyplot as plt
@@ -85,7 +86,7 @@ class PlusPreproc(object):
         self.args = args
         self.convertor = PreProcess(args)
 
-        self.ego_id = 0
+        self.ego_id = -1
 
         self.topics = [
             "/perception/lane_path",
@@ -113,7 +114,7 @@ class PlusPreproc(object):
             "ON_ROAD": 7,
         }
 
-        self.columns = ["TIMESTAMP", "FRAMES", "TRACK_ID", "OBJECT_TYPE", "X", "Y", "V", "YAW", "EGO_RELATION",
+        self.columns = ["TIMESTAMP", "TRACK_ID", "OBJECT_TYPE", "X", "Y", "VX", "VY", "YAW", "EGO_RELATION",
                         "HAS_PREDS", "PRED_TRAJ", "EGO_LANE_PRESENCE"]
 
         self.det_type = {
@@ -141,36 +142,33 @@ class PlusPreproc(object):
             "RIGHT_BOUNDARY": 6
         }
 
-    def store_file(self, pd_obs, pb_lanes, bag_path):
-        sample_loop = tqdm(range(0, pd_obs["FRAMES"].unique().max() - self.args.pred_len - self.args.obs_len + 1),
+    def store_file(self, pd_ego, pd_obs, pd_lanes, bag_path):
+        sample_loop = tqdm(range(pd_ego["TIMESTAMP"].unique().min(),
+                                 pd_ego["TIMESTAMP"].unique().max() - self.args.pred_len - self.args.obs_len + 1),
                            desc="Processing",
-                           total=pd_obs["FRAMES"].unique().max() - self.args.pred_len - self.args.obs_len + 1,
+                           total=pd_obs["TIMESTAMP"].unique().max() - pd_ego["TIMESTAMP"].unique().min()
+                                 - self.args.pred_len - self.args.obs_len + 1,
                            leave=False)
         for begin in sample_loop:
             observed_frame = begin + self.args.obs_len - 1
             end = begin + self.args.obs_len + self.args.pred_len
-            df_ob = pd_obs[pd_obs["FRAMES"].isin(range(begin, end))]
 
-            track_id_index = df_ob.columns.get_loc("TRACK_ID")
-            object_type_index = df_ob.columns.get_loc("OBJECT_TYPE")
-            df_new = df_ob.values
-            df_new[df_new[:, track_id_index] == self.ego_id, object_type_index] = self.det_type["AGENT"]
-            df_ob = pd.DataFrame(df_new, columns=df_ob.columns, index=df_ob.index)
+            df_obs = pd_obs[pd_obs["TIMESTAMP"].isin(range(begin, end))]
+            df_ego = pd_ego[pd_ego["TIMESTAMP"].isin(range(begin, end))]
+
+            ts_ego = np.array(df_ego["TIMESTAMP"].values).astype(np.int64)
+            if np.all(ts_ego > observed_frame) or observed_frame not in ts_ego:
+                continue
+
             df_lane = pd.DataFrame([])
-
-            if observed_frame in pb_lanes.groups.keys():
-                df_lane = pb_lanes.get_group(observed_frame)
+            if observed_frame in pd_lanes.groups.keys():
+                df_lane = pd_lanes.get_group(observed_frame)
                 lane_cl = df_lane[df_lane["OBJECT_TYPE"] == self.det_type["CENTER_LANE"]]
                 if lane_cl.shape[0] <= 0:
                     continue
-
             if df_lane.shape[0] > 0:
-                df = pd.concat([df_ob, df_lane], axis=0, copy=False, sort=False)
+                df = pd.concat([df_ego, df_obs, df_lane], axis=0, copy=False, sort=False)
             else:
-                continue
-
-            agent = df[df["OBJECT_TYPE"] == self.det_type["AGENT"]]
-            if agent.shape[0] != self.args.obs_len + self.args.pred_len:
                 continue
 
             file_name = os.path.basename(bag_path).split(".")[0] + "_" + str(observed_frame) + "_" + str(self.ego_id)
@@ -185,8 +183,8 @@ class PlusPreproc(object):
 
             if not self.args.debug and self.args.argo:
                 # convert Plus data to Argo data
-                data, headers = self.convertor.process(file_name, df)
-                if np.all(data[0][-1] != 2) and self.args.ego_lead:
+                data, headers = self.convertor.process(file_name, df, begin)
+                if np.all(data[0][-2] != 2) and self.args.ego_lead:
                     continue
                 if os.path.isabs(self.args.save_dir):
                     save_dir = os.path.join(self.args.save_dir, self.args.mode, file_name + "_argo" + ".pkl")
@@ -199,104 +197,17 @@ class PlusPreproc(object):
 
     def extract_data_from_file(self, bag_path, decoder):
         with self.open_bag(bag_path) as bag:
-            obs_list, lane_list, lane_msg, odom = [], [], None, ()
-            obs_num, lane_num, odom_num = -1, 0, 0
-            ts_list = []
+            obs_dict, lane_dict, ego_dict = defaultdict(), defaultdict(), defaultdict()
             for topic_name, msg_raw, ts in bag.read_messages(topics=self.topics, raw=True):
-                ts = ts.to_sec()
-
-                # remove duplicated data with the same timestamp
-                if len(ts_list) > 0 and min(abs(np.asarray(ts_list) - ts)) < 1e-4:
-                    continue
-                else:
-                    ts_list.append(ts)
-
+                ts = int(round(ts.to_sec() * 10))
                 msg = decoder.decode(topic_name, msg_raw[1])
 
                 if topic_name == "/prediction/obstacles":
-                    obs_num += 1
-                    # obstacle step 1: obtain info of ego
-                    if len(odom) > 0:
-                        obs_list.append(
-                            [ts, obs_num, self.ego_id, self.det_type["AV"], odom[0], odom[1], odom[2], odom[3],
-                             self.ego_relation["EGO"], False, None, self.ego_lane_presence["IN_EGOLANE"]])
-
-                    # lane
-                    if lane_msg is not None and len(lane_msg.lane) > 0:
-                        ego_lane_id = lane_msg.ego_lane_id
-                        ego_left_lane_id = lane_msg.ego_left_lane_id
-                        ego_right_lane_id = lane_msg.ego_right_lane_id
-                        for lane in lane_msg.lane:
-                            lane_id = lane.lane_id
-                            if lane_id not in [ego_lane_id, ego_left_lane_id, ego_right_lane_id]:
-                                continue
-
-                            center_len, lfb_len, rtb_len = 500, 500, 500
-                            if len(lane.center_curve.segment) > 0:
-                                center_len = len(lane.center_curve.segment[0].line_segment.point)
-                            if len(lane.left_boundary.curve.segment) > 0:
-                                lfb_len = len(lane.left_boundary.curve.segment[0].line_segment.point)
-                            if len(lane.right_boundary.curve.segment) > 0:
-                                rtb_len = len(lane.right_boundary.curve.segment[0].line_segment.point)
-                            min_point_len = min(center_len, lfb_len, rtb_len)
-
-                        lanes_p0 = []
-                        for lane in lane_msg.lane:
-                            lane_id = lane.lane_id
-                            if lane_id == ego_lane_id:
-                                ego_relation = self.ego_relation["EGO"]
-                            elif lane_id == ego_left_lane_id:
-                                ego_relation = self.ego_relation["LEFT"]
-                            elif lane_id == ego_right_lane_id:
-                                ego_relation = self.ego_relation["RIGHT"]
-                            else:
-                                continue
-
-                            for segment in lane.center_curve.segment:
-                                lane_points = segment.line_segment.point
-                                if center_len >= 1.5 * min_point_len:
-                                    lane_points = segment.line_segment.point[::2]
-                                for i in range(len(lane_points)):
-                                    point = lane_points[i]
-                                    lane_list.append(
-                                        [ts, obs_num, lane_id, self.det_type["CENTER_LANE"], point.x, point.y, 0, 0,
-                                         ego_relation, None, None, None])
-
-                            for segment in lane.left_boundary.curve.segment:
-                                lane_points = segment.line_segment.point
-                                # remove deduplicated lanes
-                                if (len(lane_points) == 0) or (
-                                        len(lane_points) > 0 and (lane_points[0].x, lane_points[0].y) in lanes_p0):
-                                    continue
-                                lanes_p0.append((lane_points[0].x, lane_points[0].y))
-                                if len(segment.line_segment.point) >= 1.5 * min_point_len:
-                                    lane_points = segment.line_segment.point[::2]
-                                for i in range(len(lane_points)):
-                                    point = lane_points[i]
-                                    lane_list.append(
-                                        [ts, obs_num, lane_id, self.det_type["LEFT_BOUNDARY"], point.x, point.y, 0, 0,
-                                         ego_relation, None, None, None])
-
-                            for segment in lane.right_boundary.curve.segment:
-                                lane_points = segment.line_segment.point
-                                if (len(lane_points) == 0) or (
-                                        len(lane_points) > 0 and (lane_points[0].x, lane_points[0].y) in lanes_p0):
-                                    continue
-                                lanes_p0.append((lane_points[0].x, lane_points[0].y))
-
-                                if len(segment.line_segment.point) >= 1.5 * min_point_len:
-                                    lane_points = segment.line_segment.point[::2]
-                                for i in range(len(lane_points)):
-                                    point = lane_points[i]
-                                    lane_list.append(
-                                        [ts, obs_num, lane_id, self.det_type["RIGHT_BOUNDARY"], point.x, point.y, 0, 0,
-                                         ego_relation, None, None, None])
-
-                    # obstacle step 2: obtain info of surrounding agents
                     pred_obs = msg.prediction_obstacle
                     if not pred_obs:
                         continue
-                    for i, pred_ob in enumerate(pred_obs):
+                    obs_list = []
+                    for pred_ob in pred_obs:
                         # trajectory
                         pred = pred_ob.trajectory
                         if len(pred) == 1:
@@ -310,30 +221,76 @@ class PlusPreproc(object):
                             pred_traj = None
                         # perception obstacle
                         obs = pred_ob.perception_obstacle
-                        v = math.sqrt(obs.motion.vx * obs.motion.vx + obs.motion.vy * obs.motion.vy)
+                        if np.isnan(obs.motion.x) or np.isnan(obs.motion.y) \
+                                or np.isnan(obs.motion.vx) or np.isnan(obs.motion.vy) or np.isnan(obs.motion.yaw):
+                            continue
                         obs_list.append(
-                            [ts, obs_num, obs.id, obs.type, obs.motion.x, obs.motion.y, v, obs.motion.yaw,
-                             pred_ob.ego_relation, has_preds, pred_traj, obs.ego_lane_presence])
+                            [ts, obs.id, obs.type, obs.motion.x, obs.motion.y, obs.motion.vx, obs.motion.vy,
+                             obs.motion.yaw, pred_ob.ego_relation, has_preds, pred_traj, obs.ego_lane_presence])
+                    obs_dict[ts] = obs_list
 
                 if topic_name == "/perception/lane_path":
                     lane_msg = msg
-                    lane_num += 1
+                    if lane_msg is not None and len(lane_msg.lane) > 0:
+                        ego_lane_id = lane_msg.ego_lane_id
+                        ego_left_lane_id = lane_msg.ego_left_lane_id
+                        ego_right_lane_id = lane_msg.ego_right_lane_id
+                        lane_list = []
+                        for lane in lane_msg.lane:
+                            lane_id = lane.lane_id
+                            if lane_id == ego_lane_id:
+                                ego_relation = self.ego_relation["EGO"]
+                            elif lane_id == ego_left_lane_id:
+                                ego_relation = self.ego_relation["LEFT"]
+                            elif lane_id == ego_right_lane_id:
+                                ego_relation = self.ego_relation["RIGHT"]
+                            else:
+                                continue
+
+                            lane_point_list = []
+                            for segment in lane.center_curve.segment:
+                                for point in segment.line_segment.point:
+                                    if np.isnan(point.x) or np.isnan(point.y) or np.isnan(point.yaw):
+                                        continue
+                                    lane_point_list.append(
+                                        [ts, lane_id, self.det_type["CENTER_LANE"], point.x, point.y, 0, 0, point.yaw,
+                                         ego_relation, None, None, None])
+                            if len(lane_point_list) > 0:
+                                lane_list.append(lane_point_list)
+                        if len(lane_list) != 0:
+                            lane_dict[ts] = lane_list
 
                 if topic_name == "/navsat/odom":
                     x = msg.pose.pose.position.x
                     y = msg.pose.pose.position.y
                     vx = msg.twist.twist.linear.x
                     vy = msg.twist.twist.linear.y
-                    v = math.sqrt(vx * vx + vy * vy)
                     yaw = msg.pose.pose.orientation.z
-                    odom = (x, y, v, yaw)
-                    odom_num += 1
+                    odom = [ts, self.ego_id, self.det_type["AV"], x, y, vx, vy, yaw,
+                            self.ego_relation["EGO"], False, None, self.ego_lane_presence["IN_EGOLANE"]]
+                    ego_dict[ts] = odom
+            ego_list, obs_list, map_list = self.gather(ego_dict, obs_dict, lane_dict)
+            pd_ego = pd.DataFrame(data=ego_list, columns=self.columns)
             pd_obs = pd.DataFrame(data=obs_list, columns=self.columns)
-            pb_lanes = pd.DataFrame(data=lane_list, columns=self.columns)
-            pb_lanes = pb_lanes.groupby("FRAMES")
-            if pd_obs.values.shape[0] > 0:
-                self.store_file(pd_obs, pb_lanes, bag_path)
+            pd_lanes = pd.DataFrame(data=map_list, columns=self.columns)
+            pd_lanes = pd_lanes.groupby("TIMESTAMP")
+            if pd_ego.values.shape[0] > 0:
+                self.store_file(pd_ego, pd_obs, pd_lanes, bag_path)
             # exit(0)
+
+    @staticmethod
+    def gather(ego_dict, obs_dict, lane_dict):
+        ego_list, agent_list, map_list = [], [], []
+        for ts in sorted(ego_dict.keys()):
+            ego_list.append(ego_dict[ts])
+        for ts in sorted(obs_dict.keys()):
+            for obs in obs_dict[ts]:
+                agent_list.append(obs)
+        for ts in sorted(lane_dict.keys()):
+            for lane in lane_dict[ts]:
+                for point in lane:
+                    map_list.append(point)
+        return ego_list, agent_list, map_list
 
     @staticmethod
     def open_bag(bag_path):
@@ -368,8 +325,8 @@ class PlusPreproc(object):
             obs_info = obs_group.get_group(obs_id)
             if obs_id == self.ego_id:
                 ax.plot(obs_info["X"].to_numpy(), obs_info["Y"].to_numpy(), "b-", label="ego")
-                ax.scatter(obs_info.iloc[0, 4], obs_info.iloc[0, 5], marker="*")
-                ax.scatter(obs_info.iloc[-1, 4], obs_info.iloc[-1, 5], marker="o")
+                ax.scatter(obs_info["X"].to_numpy()[0], obs_info["Y"].to_numpy()[0], marker="*")
+                ax.scatter(obs_info["X"].to_numpy()[-1], obs_info["Y"].to_numpy()[-1], marker="o")
             elif self.det_type["CONE"] in obs_info["OBJECT_TYPE"].values or \
                     self.det_type["UNKNOWN"] in obs_info["OBJECT_TYPE"].values:
                 # plt.scatter(obs_info["X"].to_numpy(), obs_info["Y"].to_numpy(), marker="*")
@@ -385,7 +342,7 @@ class PlusPreproc(object):
             else:
                 # plt.plot(obs_info["X"].to_numpy(), obs_info["Y"].to_numpy(), "rh", label="obs")
                 pass
-        # plt.show()
+        plt.show()
 
 
 def load_bag_save_features(args, start_idx, batch_size, files):
