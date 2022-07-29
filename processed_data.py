@@ -41,24 +41,7 @@ class ProcessedDataset(Dataset):
         pad_flags = df_dict["PAD_FLAGS"]
         graph = df_dict["GRAPH"]
 
-        update_mask = (np.abs(trajs[:, config["num_obs"] - 1, 0]) < 100) * \
-                      (np.abs(trajs[:, config["num_obs"] - 1, 1]) < 7)
-
-        # chose new vehicle coordinate
-        if self.train:
-            idx = np.random.choice(np.nonzero(update_mask)[0], 1)[0]
-            # transform from agent coordinate to other vehicle coordinate
-            orig = trajs[idx, config["num_obs"] - 1]
-            vec = orig - trajs[idx, 0]
-            theta = np.arctan2(vec[1], vec[0])
-            rot = np.array([[np.cos(theta), -np.sin(theta)],
-                            [np.sin(theta), np.cos(theta)]])
-            trajs = (np.asarray(trajs) - orig).dot(rot)
-            graph["ctrs"] = (np.asarray(graph["ctrs"]) - orig).dot(rot)
-            graph["feats"] = (np.asarray(graph["feats"])).dot(rot)
-            # transform from vehicle coordinate to world coordinate
-            orig = np.matmul(orig, df_dict["ROT"]) + df_dict["ORIG"]
-            rot = np.matmul(rot, df_dict["ROT"])
+        update_mask = np.ones(trajs.shape[0]).astype(np.bool_)
 
         data = {
             "seq_id": seq_id,
@@ -74,25 +57,8 @@ class ProcessedDataset(Dataset):
         }
 
         if self.train is True:
-            # speed augmentation
-            scaling_ratio = np.random.rand() * (config["scaling_ratio"][1] - config["scaling_ratio"][0]) + \
-                            config["scaling_ratio"][0]
-            data["trajs_obs"] *= scaling_ratio
-            data["graph"]["ctrs"] *= scaling_ratio
-            data["graph"]["feats"] *= scaling_ratio
-            data["scaling_ratio"] = scaling_ratio
-            # past motion dropout
-            dropout = np.random.randint(0, config["past_motion_dropout"], size=len(data["trajs_obs"]))
-            for i, traj in enumerate(data["trajs_obs"]):
-                traj[:dropout[i]] = 0
-                data["pad_obs"][i][:dropout[i]] = 0
-            # flip
-            flip = np.random.rand()
-            data["flip"] = flip
-            if flip < config["flip"]:
-                data["trajs_obs"][:, :, :2] = data["trajs_obs"][:, :, :2][..., ::-1].copy()
-                data["graph"]["ctrs"] = data["graph"]["ctrs"][..., ::-1].copy()
-                data["graph"]["feats"] = data["graph"]["feats"][..., ::-1].copy()
+            data = DataAug.simple_aug(data)
+            data = DataAug.transform(data)
         return data
 
 
@@ -162,8 +128,7 @@ class BaseProcessedDataset(Dataset):
 
         graph = df_dict["GRAPH"]
 
-        update_mask = (np.abs(trajs[:, config["num_obs"] - 1, 0]) < 100) * \
-                      (np.abs(trajs[:, config["num_obs"] - 1, 1]) < 7)
+        update_mask = np.ones(trajs.shape[0]).astype(np.bool_)
 
         data = {
             "seq_id": seq_id,
@@ -179,6 +144,10 @@ class BaseProcessedDataset(Dataset):
             "pred_trajs": pred_trajs,
             "update_mask": update_mask
         }
+
+        if self.train is True:
+            data = DataAug.simple_aug(data)
+            data = DataAug.transform(data)
         return data
 
 
@@ -223,24 +192,7 @@ class LeadProcessedDataset(Dataset):
 
         graph = df_dict["GRAPH"]
 
-        update_mask = (np.abs(trajs[:, config["num_obs"] - 1, 0]) < 100) * \
-                      (np.abs(trajs[:, config["num_obs"] - 1, 1]) < 7)
-
-        # # use ego_lead as orig
-        # idx = np.argwhere(ego_lane_presence == 2)[0, 0]
-        # # transform from agent coordinate to other vehicle coordinate
-        # orig = trajs[idx, config["num_obs"] - 1]
-        # vec = orig - trajs[idx, 0]
-        # theta = np.arctan2(vec[1], vec[0])
-        # rot = np.array([[np.cos(theta), -np.sin(theta)],
-        #                 [np.sin(theta), np.cos(theta)]])
-        # trajs = (np.asarray(trajs) - orig).dot(rot)
-        # pred_trajs = (np.asarray(pred_trajs) - orig).dot(rot)
-        # graph["ctrs"] = (np.asarray(graph["ctrs"]) - orig).dot(rot)
-        # graph["feats"] = (np.asarray(graph["feats"])).dot(rot)
-        # # transform from vehicle coordinate to world coordinate
-        # orig = np.matmul(orig, df_dict["ROT"]) + df_dict["ORIG"]
-        # rot = np.matmul(rot, df_dict["ROT"])
+        update_mask = np.ones(trajs.shape[0]).astype(np.bool_)
 
         data = {
             "seq_id": seq_id,
@@ -257,6 +209,55 @@ class LeadProcessedDataset(Dataset):
             "update_mask": update_mask,
             "ego_lane_presence": ego_lane_presence
         }
+
+        if self.train is True:
+            data = DataAug.simple_aug(data)
+            data = DataAug.transform(data)
+        return data
+
+
+class DataAug:
+    @classmethod
+    def simple_aug(cls, data):
+        # speed augmentation
+        scaling_ratio = np.random.rand() * (config["scaling_ratio"][1] - config["scaling_ratio"][0]) + \
+                        config["scaling_ratio"][0]
+        data["trajs_obs"] *= scaling_ratio
+        data["graph"]["ctrs"] *= scaling_ratio
+        data["graph"]["feats"] *= scaling_ratio
+        data["scaling_ratio"] = scaling_ratio
+        # past motion dropout
+        dropout = np.random.randint(0, config["past_motion_dropout"], size=len(data["trajs_obs"]))
+        for i, traj in enumerate(data["trajs_obs"]):
+            traj[:dropout[i]] = 0
+            data["pad_obs"][i][:dropout[i]] = 0
+        # flip
+        flip = np.random.rand()
+        data["flip"] = flip
+        if flip < config["flip"]:
+            data["trajs_obs"][:, :, :2] = data["trajs_obs"][:, :, :2][..., ::-1].copy()
+            data["graph"]["ctrs"] = data["graph"]["ctrs"][..., ::-1].copy()
+            data["graph"]["feats"] = data["graph"]["feats"][..., ::-1].copy()
+        return data
+
+    @classmethod
+    def transform(cls, data):
+        idx = np.random.choice(np.nonzero(data["update_mask"])[0], 1)[0]
+        # transform from agent coordinate to other vehicle coordinate
+        orig = data["trajs_obs"][idx, config["num_obs"] - 1, :2]
+        vec = orig - data["trajs_obs"][idx, 0, :2]
+        theta = np.arctan2(vec[1], vec[0])
+        rot = np.array([[np.cos(theta), -np.sin(theta)],
+                        [np.sin(theta), np.cos(theta)]])
+        data["trajs_obs"][:, :, :2] = (np.asarray(data["trajs_obs"][:, :, :2]) - orig).dot(rot)
+        data["trajs_obs"][:, :, 2:4] = np.asarray(data["trajs_obs"][:, :, 2:4]).dot(rot)
+        data["trajs_fut"][:, :, :2] = (np.asarray(data["trajs_fut"][:, :, :2]) - orig).dot(rot)
+        data["trajs_fut"][:, :, 2:4] = np.asarray(data["trajs_fut"][:, :, 2:4]).dot(rot)
+        data["graph"]["ctrs"] = (np.asarray(data["graph"]["ctrs"]) - orig).dot(rot)
+        data["graph"]["feats"] = (np.asarray(data["graph"]["feats"])).dot(rot)
+        # transform from vehicle coordinate to world coordinate
+        data["orig"] = np.matmul(orig, data["rot"]) + data["orig"]
+        data["rot"] = np.matmul(rot, data["rot"])
         return data
 
 
