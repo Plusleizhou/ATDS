@@ -59,7 +59,7 @@ def val(data_loader, net, loss_net, vis=visualization, post_process=PostProcess,
             loss_out = loss_net(out, batch)
             post_out = post_process(out, batch)
             post_out.append(metrics, loss_out)
-            if (i + 1) % 100 == 0:
+            if (i + 1) % 50 == 0 and rank == 0:
                 vis(out, batch, i, True, False)
     val_out = post_out.display(metrics)
     net.train()

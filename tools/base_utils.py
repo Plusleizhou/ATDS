@@ -68,12 +68,6 @@ class BasePostProcess(object):
 
 
 def pred_metrics(preds, pred_trajs, gt_preds, has_preds, num_preds):
-    mask = (np.abs(gt_preds[:, 0, 0]) < 100) * (np.abs(gt_preds[:, 0, 1]) < 7)
-    pred_trajs = pred_trajs[mask]
-    gt_preds = gt_preds[mask]
-    has_preds = has_preds[mask]
-    preds = preds[mask]
-
     has_preds = (has_preds == 1)[:, :num_preds]
     has_final_preds = has_preds[:, num_preds - 1]  # which has final point
 
@@ -108,6 +102,8 @@ def visualization(out, data, num, save, show):
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.set_title(data["seq_id"][0], fontweight="bold")
     ax.axis("equal")
+
+    data["trajs_obs"] = [x[:, :, :2] for x in data["trajs_obs"]]
 
     orig = data['orig'][0].detach().cpu().numpy()
     rot = data["rot"][0].detach().cpu().numpy()

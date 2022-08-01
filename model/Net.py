@@ -67,15 +67,16 @@ def agent_gather(trajs_obs, pad_obs):
 
     agents, agent_locs = [], []
     for i in range(batch_size):
-        feats = torch.zeros_like(trajs_obs[i])
-        feats[:, 1:, :] = trajs_obs[i][:, 1:, :] - trajs_obs[i][:, :-1, :]
-        agents.append(torch.cat([feats, pad_obs[i].unsqueeze(2)], dim=-1))
-        agent_locs.append(torch.cat([trajs_obs[i], pad_obs[i].unsqueeze(2)], dim=-1))
+        feats = torch.zeros_like(trajs_obs[i][:, :, :2])  # x, y
+        feats[:, 1:, :] = trajs_obs[i][:, 1:, :2] - trajs_obs[i][:, :-1, :2]
+        agents.append(torch.cat([feats, trajs_obs[i][:, :, 2:4] / 10, trajs_obs[i][:, :, 4:],
+                                 pad_obs[i].unsqueeze(2)], dim=-1))
+        agent_locs.append(torch.cat([trajs_obs[i][:, :, :2], pad_obs[i].unsqueeze(2)], dim=-1))
 
     agents = [x.transpose(1, 2) for x in agents]
     agents = torch.cat(agents, 0)
-    agents[:, :2] *= agents[:, -1:]
-    agents[:, :2, 1:] *= agents[:, -1:, :-1]
+    agents[:, :-1] *= agents[:, -1:]
+    agents[:, :-1, 1:] *= agents[:, -1:, :-1]
 
     agent_locs = [x.transpose(1, 2) for x in agent_locs]
     agent_locs = torch.cat(agent_locs, 0)

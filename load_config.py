@@ -8,7 +8,7 @@ model_name = "log-0"
 config["n_agent"] = 128
 config["n_map"] = 128
 
-config["num_mods"] = 6
+config["num_mods"] = 1
 config["num_preds"] = 30
 config["num_obs"] = 20
 config["agent2map_dist"] = 15.0
@@ -52,7 +52,7 @@ config["gamma"] = 0.1
 config["train_batch_size"] = 4
 config["train_workers"] = 0
 
-config["num_display"] = 1000
+config["num_display"] = 4
 config["num_val"] = 2
 config["num_save"] = 2
 config["save_dir"] = os.path.join("results", model_name, "weights/")

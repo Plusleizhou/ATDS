@@ -50,7 +50,7 @@ class ProcessedDataset(Dataset):
             "ts": np.diff(ts, prepend=ts[0])[:config["num_obs"]],
             "trajs_obs": trajs[:, :config["num_obs"]],
             "pad_obs": pad_flags[:, :config["num_obs"]],
-            "trajs_fut": trajs[:, config["num_obs"]:],
+            "trajs_fut": trajs[:, config["num_obs"]:, :2],
             "pad_fut": pad_flags[:, config["num_obs"]:],
             "graph": graph,
             "update_mask": update_mask
@@ -137,7 +137,7 @@ class BaseProcessedDataset(Dataset):
             "ts": np.diff(ts, prepend=ts[0])[:config["num_obs"]],
             "trajs_obs": trajs_obs,
             "pad_obs": pad_obs,
-            "trajs_fut": trajs_fut,
+            "trajs_fut": trajs_fut[:, :, :2],
             "pad_fut": pad_fut,
             "graph": graph,
             "has_preds": has_preds,
@@ -201,7 +201,7 @@ class LeadProcessedDataset(Dataset):
             "ts": np.diff(ts, prepend=ts[0])[:config["num_obs"]],
             "trajs_obs": trajs[:, :config["num_obs"]],
             "pad_obs": pad_obs,
-            "trajs_fut": trajs[:, config["num_obs"]:],
+            "trajs_fut": trajs[:, config["num_obs"]:, :2],
             "pad_fut": pad_fut,
             "graph": graph,
             "has_preds": has_preds,
@@ -252,7 +252,6 @@ class DataAug:
         data["trajs_obs"][:, :, :2] = (np.asarray(data["trajs_obs"][:, :, :2]) - orig).dot(rot)
         data["trajs_obs"][:, :, 2:4] = np.asarray(data["trajs_obs"][:, :, 2:4]).dot(rot)
         data["trajs_fut"][:, :, :2] = (np.asarray(data["trajs_fut"][:, :, :2]) - orig).dot(rot)
-        data["trajs_fut"][:, :, 2:4] = np.asarray(data["trajs_fut"][:, :, 2:4]).dot(rot)
         data["graph"]["ctrs"] = (np.asarray(data["graph"]["ctrs"]) - orig).dot(rot)
         data["graph"]["feats"] = (np.asarray(data["graph"]["feats"])).dot(rot)
         # transform from vehicle coordinate to world coordinate

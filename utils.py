@@ -164,6 +164,8 @@ def visualization_for_all_agents(out, data, num, save, show):
     fig, ax = plt.subplots(figsize=(10, 10))
     ax.axis("equal")
 
+    data["trajs_obs"] = [x[:, :, :2] for x in data["trajs_obs"]]
+
     orig = data['orig'][0].detach().cpu().numpy()
     rot = data["rot"][0].detach().cpu().numpy()
     x_min = np.min(orig[0]) - 100

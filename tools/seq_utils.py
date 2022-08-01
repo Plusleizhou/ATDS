@@ -102,6 +102,8 @@ def visualization(out, data, num, save, show):
     ax.set_title(data["seq_id"][0], fontweight="bold")
     ax.axis("equal")
 
+    data["trajs_obs"] = [x[:, :, :2] for x in data["trajs_obs"]]
+
     orig = data['orig'][0].detach().cpu().numpy()
     rot = data["rot"][0].detach().cpu().numpy()
     x_min = np.min(orig[0]) - 100
