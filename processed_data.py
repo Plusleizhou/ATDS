@@ -58,7 +58,7 @@ class ProcessedDataset(Dataset):
 
         if self.train is True:
             data = DataAug.simple_aug(data)
-            data = DataAug.transform(data)
+            # data = DataAug.transform(data)
         return data
 
 
@@ -147,7 +147,7 @@ class BaseProcessedDataset(Dataset):
 
         if self.train is True:
             data = DataAug.simple_aug(data)
-            data = DataAug.transform(data)
+            # data = DataAug.transform(data)
         return data
 
 
@@ -212,7 +212,7 @@ class LeadProcessedDataset(Dataset):
 
         if self.train is True:
             data = DataAug.simple_aug(data)
-            data = DataAug.transform(data)
+            # data = DataAug.transform(data)
         return data
 
 

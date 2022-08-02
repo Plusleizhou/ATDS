@@ -157,7 +157,7 @@ class PreProcess(object):
         trajs = trajs.astype(np.float32)
         pad_flags = np.array(pad_flags).astype(np.int16)
         ego_lane_presence = np.array(ego_lane_presence).astype(np.int16)
-        agent_ids = np.array(agent_ids).astype(np.int16)
+        agent_ids = np.array(agent_ids).astype(np.int64)
 
         return ts, trajs, pad_flags, orig, rot, pred_trajs, has_preds, ego_lane_presence, agent_ids
 

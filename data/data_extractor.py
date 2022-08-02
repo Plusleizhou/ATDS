@@ -210,7 +210,7 @@ class PlusPreproc(object):
                     for pred_ob in pred_obs:
                         # trajectory
                         pred = pred_ob.trajectory
-                        if len(pred) == 1:
+                        if len(pred) >= 1:
                             has_preds = True
                             pred_traj = np.zeros((len(pred[0].trajectory_point[1:]), 2))
                             for k, loc in enumerate(pred[0].trajectory_point[1:]):
