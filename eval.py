@@ -34,7 +34,7 @@ def parse_args():
 
 
 def loader(args):
-    assert args.mode in ["ego", "seq", "base", "lead"]
+    assert args.mode in ["ego", "seq", "base", "lead", "benchmark"]
     if args.mode == "ego":
         from utils import visualization
         from processed_data import ProcessedDataset
@@ -47,10 +47,14 @@ def loader(args):
         from tools.base_utils import visualization
         from processed_data import BaseProcessedDataset as ProcessedDataset
         from tools.base_utils import BasePostProcess as PostProcess
-    else:
+    elif args.mode == "lead":
         from tools.lead_utils import visualization
         from processed_data import LeadProcessedDataset as ProcessedDataset
         from tools.lead_utils import LeadPostProcess as PostProcess
+    else:
+        from tools.base_utils import visualization
+        from processed_data import BenchmarkProcessedDataset as ProcessedDataset
+        from tools.base_utils import BasePostProcess as PostProcess
     return visualization, ProcessedDataset, PostProcess
 
 

@@ -144,6 +144,8 @@ def visualization(out, data, num, save, show):
     pad_obs = data["pad_obs"][0][0].detach().cpu().numpy()
     ax.plot(trajs_obs[:, 0], trajs_obs[:, 1], marker=".", alpha=1, color="r", zorder=20)
 
+    all_points = np.expand_dims(np.concatenate([trajs_obs, gt_preds], axis=0), 0)
+
     # surrounding agents
     has_preds = data["has_preds"][0].detach().cpu().numpy().astype(np.bool)
     pred_trajs = data["pred_trajs"][0].detach().cpu().numpy().dot(rot.T) + orig
@@ -179,9 +181,20 @@ def visualization(out, data, num, save, show):
             ax.text(pred[-1, 0], pred[-1, 1], str("%d" % probabilities[i, k]), fontsize=8, alpha=0.5,
                     horizontalalignment="center", verticalalignment="bottom")
 
+    all_points = np.concatenate([all_points, np.concatenate([trajs_obs, gt_preds], axis=1)], axis=0)
+    x_min = np.min(all_points[..., 0]) - 20
+    x_max = np.max(all_points[..., 0]) + 20
+    y_min = np.min(all_points[..., 1]) - 20
+    y_max = np.max(all_points[..., 1]) + 20
+    center = [(x_min + x_max) / 2, (y_min + y_max) / 2]
+    width = np.max([x_max - x_min, y_max - y_min])
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(y_min, y_max)
+
     base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids = pred_metrics(
         preds, pred_trajs, gt_preds, pad_fut, config["num_preds"])
-    ax.text(x_max, y_min, "b_ade1:{:.3f}\nb_fde1:{:.3f}\nade1: {:.3f}\nfde1: {:.3f}\nade6: {:.3f}\nfde6: {:.3f}".
+    ax.text(center[0] + width / 2, center[1] - width / 2,
+            "b_ade1:{:.3f}\nb_fde1:{:.3f}\nade1: {:.3f}\nfde1: {:.3f}\nade6: {:.3f}\nfde6: {:.3f}".
             format(base_ade1, base_fde1, ade1, fde1, ade, fde),
             fontsize=15, horizontalalignment="right", verticalalignment="bottom")
 

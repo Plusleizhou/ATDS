@@ -216,6 +216,82 @@ class LeadProcessedDataset(Dataset):
         return data
 
 
+class BenchmarkProcessedDataset(Dataset):
+    def __init__(self, path, mode="val"):
+        super(BenchmarkProcessedDataset, self).__init__()
+        self.path = path
+        self.mode = mode
+        self.train = False
+        if self.mode == "train":
+            self.train = True
+        file_list = os.listdir(path)
+        file_list.sort(key=lambda x: int(x.split(".")[0].split("_")[-3]) +
+                                                       len(file_list) * int(x.split(".")[0].split("_")[-2]))
+        self.file_list = file_list
+        from data.data_utils.data_benchmark import get_val_dict
+        self.val_dict = get_val_dict()
+
+    def __len__(self):
+        return len(self.file_list)
+
+    def __getitem__(self, item):
+        file = self.file_list[item]
+        df = pd.read_pickle(os.path.join(self.path, file))
+        # "SEQ_ID", "ORIG", "ROT", "TIMESTAMP", "TRAJS", "PAD_FLAGS", "GRAPH"
+        df_dict = {}
+        for key in list(df.keys()):
+            df_dict[key] = df[key].values[0]
+
+        seq_id = df_dict["SEQ_ID"]
+        orig = df_dict["ORIG"]
+        rot = df_dict["ROT"]
+        ts = df_dict["TIMESTAMP"]
+        agent_ids = df_dict["AGENT_IDS"]
+
+        trajs = df_dict["TRAJS"]
+        trajs_obs = trajs[:, :config["num_obs"]]
+        trajs_fut = trajs[:, config["num_obs"]:]
+
+        pad_flags = df_dict["PAD_FLAGS"]
+        pad_obs = pad_flags[:, :config["num_obs"]]
+        pad_fut = pad_flags[:, config["num_obs"]:]
+
+        has_preds = df_dict["HAS_PREDS"]
+        pred_trajs = df_dict["PRED_TRAJS"].astype(np.float32)
+
+        if not self.train:
+            mask = np.zeros_like(has_preds)
+            for agent_id in self.val_dict[seq_id]:
+                if agent_id in agent_ids:
+                    mask[np.argwhere(agent_ids == agent_id)[0, 0]] = 1
+            pred_trajs = pred_trajs[mask[has_preds == 1] == 1]
+            has_preds *= mask
+
+        graph = df_dict["GRAPH"]
+
+        update_mask = np.ones(trajs.shape[0]).astype(np.bool_)
+
+        data = {
+            "seq_id": seq_id,
+            "orig": orig,
+            "rot": rot,
+            "ts": np.diff(ts, prepend=ts[0])[:config["num_obs"]],
+            "trajs_obs": trajs_obs,
+            "pad_obs": pad_obs,
+            "trajs_fut": trajs_fut[:, :, :2],
+            "pad_fut": pad_fut,
+            "graph": graph,
+            "has_preds": has_preds,
+            "pred_trajs": pred_trajs,
+            "update_mask": update_mask
+        }
+
+        if self.train is True:
+            data = DataAug.simple_aug(data)
+            # data = DataAug.transform(data)
+        return data
+
+
 class DataAug:
     @classmethod
     def simple_aug(cls, data):
