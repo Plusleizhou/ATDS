@@ -101,15 +101,15 @@ def main():
             post_out.append(metrics, loss_out)  # 加入了全部agent的loss_out
             # metrics记录了所有轨迹，实时计算平均误差
             if (i + 1) % 50 == 0:
-                val_out = post_out.display(metrics, args.num_preds)  # agent的指标
+                val_out = post_out.display(metrics, args.num_preds, False)  # agent的指标
                 if args.viz:
                     visualization_for_all_agents(out, batch, i, True, False)
                     visualization(out, batch, i, True, False)
                 loop.set_postfix_str(f'total_loss={val_out["loss"]:.3f}, minFDE={val_out["fde"]:.3f}')
-    val_out = post_out.display(metrics, args.num_preds)
+    val_out = post_out.display(metrics, args.num_preds, True)
     for k, v in val_out.items():
-        print("{}: {:.4f}".format(k, v))
-    loop.set_postfix_str(f'total_loss={val_out["loss"]:.3f}, minFDE={val_out["fde"]:.3f}')
+        print("{}: {}".format(k, v))
+    loop.set_postfix_str(f'total_loss={val_out["loss"]:.3f}, minFDE={val_out["fde"][0]:.3f}')
 
 
 if __name__ == '__main__':

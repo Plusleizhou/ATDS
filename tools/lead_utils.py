@@ -43,7 +43,7 @@ class LeadPostProcess(object):
         return metrics
 
     @staticmethod
-    def display(metrics, num_preds=30):
+    def display(metrics, num_preds=30, multi_range=False):
         cls = metrics["cls_loss"] / (metrics["num_cls"] + 1e-10)
         reg = metrics["reg_loss"] / (metrics["num_reg"] + 1e-10)
         key_points = metrics["key_points_loss"] / (metrics["num_key_points"] + 1e-10)

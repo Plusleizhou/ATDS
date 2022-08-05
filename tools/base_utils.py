@@ -40,7 +40,7 @@ class BasePostProcess(object):
         return metrics
 
     @staticmethod
-    def display(metrics, num_preds=30):
+    def display(metrics, num_preds=30, multi_range=False):
         cls = metrics["cls_loss"] / (metrics["num_cls"] + 1e-10)
         reg = metrics["reg_loss"] / (metrics["num_reg"] + 1e-10)
         key_points = metrics["key_points_loss"] / (metrics["num_key_points"] + 1e-10)
@@ -50,20 +50,48 @@ class BasePostProcess(object):
         gt_preds = np.concatenate(metrics["gt_preds"], 0)
         has_preds = np.concatenate(metrics["has_preds"], 0)
         pred_trajs = np.concatenate(metrics["pred_trajs"], 0)
-        base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids = pred_metrics(preds, pred_trajs, gt_preds,
-                                                                           has_preds, num_preds)
-        out = {
-            "loss": loss,
-            "cls": cls,
-            "reg": reg,
-            "key_points": key_points,
-            "base_ade1": base_ade1,
-            "base_fde1": base_fde1,
-            "ade1": ade1,
-            "fde1": fde1,
-            "ade": ade,
-            "fde": fde
-        }
+        if multi_range:
+            base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids, miss_rate = pred_metrics(preds, pred_trajs, gt_preds,
+                                                                                          has_preds, num_preds)
+            base_ade1_2, base_fde1_2, ade1_2, fde1_2, ade_2, fde_2, min_ids_2, miss_rate_2 = pred_metrics(preds,
+                                                                                                          pred_trajs,
+                                                                                                          gt_preds,
+                                                                                                          has_preds,
+                                                                                                          20)
+            base_ade1_1, base_fde1_1, ade1_1, fde1_1, ade_1, fde_1, min_ids_1, miss_rate_1 = pred_metrics(preds,
+                                                                                                          pred_trajs,
+                                                                                                          gt_preds,
+                                                                                                          has_preds,
+                                                                                                          10)
+            out = {
+                "loss": loss,
+                "cls": cls,
+                "reg": reg,
+                "key_points": key_points,
+                "base_ade1": [base_ade1, base_ade1_2, base_ade1_1],
+                "base_fde1": [base_fde1, base_fde1_2, base_fde1_1],
+                "ade1": [ade1, ade1_2, ade_1],
+                "fde1": [fde1, fde1_2, fde1_1],
+                "ade": [ade, ade_2, ade_1],
+                "fde": [fde, fde_2, fde_1],
+                "miss_rate": [miss_rate, miss_rate_2, miss_rate_1]
+            }
+        else:
+            base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids, miss_rate = pred_metrics(preds, pred_trajs, gt_preds,
+                                                                                          has_preds, num_preds)
+            out = {
+                "loss": loss,
+                "cls": cls,
+                "reg": reg,
+                "key_points": key_points,
+                "base_ade1": base_ade1,
+                "base_fde1": base_fde1,
+                "ade1": ade1,
+                "fde1": fde1,
+                "ade": ade,
+                "fde": fde,
+                "miss_rate": miss_rate,
+            }
         return out
 
 
@@ -81,6 +109,16 @@ def pred_metrics(preds, pred_trajs, gt_preds, has_preds, num_preds):
     preds = np.asarray(preds, np.float32)
     gt_preds = np.asarray(gt_preds, np.float32)
 
+    fde1_all = np.sqrt((np.sum((gt_preds[:, num_preds - 1][has_final_preds] -
+                                preds[:, 0, num_preds - 1][has_final_preds]) ** 2, axis=-1)))
+    mr_1 = np.average(fde1_all > 1.0)
+    mr_2 = np.average(fde1_all > 2.0)
+    mr_3 = np.average(fde1_all > 3.0)
+    mr_4 = np.average(fde1_all > 4.0)
+    mr_5 = np.average(fde1_all > 5.0)
+    mr_6 = np.average(fde1_all > 6.0)
+    miss_rate = [mr_1, mr_2, mr_3, mr_4, mr_5, mr_6]
+
     ade1 = np.sqrt((np.sum((gt_preds[:, :num_preds][has_preds] -
                             preds[:, 0, :num_preds][has_preds]) ** 2, axis=-1))).mean()
     fde1 = np.sqrt((np.sum((gt_preds[:, num_preds - 1][has_final_preds] -
@@ -95,7 +133,7 @@ def pred_metrics(preds, pred_trajs, gt_preds, has_preds, num_preds):
     err = err[row_ids, min_ids]
     ade = err[..., :num_preds].mean()
     fde = err[..., num_preds - 1].mean()
-    return base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids
+    return base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids, miss_rate
 
 
 def visualization(out, data, num, save, show):
