@@ -24,7 +24,9 @@ def get_dummy_input():
                                 num_workers=config['val_workers'],
                                 shuffle=False,
                                 collate_fn=collate_fn)
-    batch = val_dataloader.__iter__().next()
+    val_dataloader = val_dataloader.__iter__()
+    # batch = val_dataloader.next()
+    batch = val_dataloader.next()
     dummy_input = list()
     tmp = list()
     for key in batch.keys():
@@ -94,8 +96,18 @@ def convert():
                    "left_u", "left_v"]
     output_names = ["cls", "reg", "key_points"]
 
+    dynamic_axes = {"trajs_obs": [0], "pad_obs": [0], "control": [0],
+                    "pre_0_u": [0], "pre_0_v": [0], "pre_1_u": [0], "pre_1_v": [0], "pre_2_u": [0], "pre_2_v": [0],
+                    "pre_3_u": [0], "pre_3_v": [0], "pre_4_u": [0], "pre_4_v": [0], "pre_5_u": [0], "pre_5_v": [0],
+                    "right_u": [0], "right_v": [0],
+                    "suc_0_u": [0], "suc_0_v": [0], "suc_1_u": [0], "suc_1_v": [0], "suc_2_u": [0], "suc_2_v": [0],
+                    "suc_3_u": [0], "suc_3_v": [0], "suc_4_u": [0], "suc_4_v": [0], "suc_5_u": [0], "suc_5_v": [0],
+                    "turn": [0], "intersect": [0],
+                    "ctrs": [0], "feats": [0],
+                    "left_u": [0], "left_v": [0]}
+
     torch.onnx.export(model, get_dummy_input(), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
-                      output_names=output_names)
+                      output_names=output_names, dynamic_axes=dynamic_axes)
 
 
 def simplify_onnx():

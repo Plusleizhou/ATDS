@@ -3,22 +3,8 @@ from torch import nn
 
 
 def index_add_naive(dst, src, idx):
-    def reduce_op(x_in):
-        return torch.sum(x_in, dim=0).unsqueeze(0)
-
-    index_range = torch.max(idx) + 1
-    bucket = [[torch.zeros(1, dst.shape[1], device=dst.device)] for _ in range(index_range)]
-
     for i in range(src.shape[0]):
-        bucket[idx[i]].append(src[i: i + 1])
-
-    for i in range(len(bucket)):
-        bucket[i] = reduce_op(torch.cat(bucket[i], dim=0))
-
-    bucket = torch.cat(bucket, dim=0)
-
-    dst[:bucket.shape[0]] = dst[:bucket.shape[0]] + bucket
-
+        dst[idx[i]] += src[i]
     return dst
 
 
