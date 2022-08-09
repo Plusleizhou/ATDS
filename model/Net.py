@@ -22,11 +22,11 @@ class Net(nn.Module):
 
         self.pyramid_decoder = PyramidDecoder(config)
 
-    def forward(self, trajs_obs, pad_obs, control, pre, right, suc, turn, intersect, ctrs, feats, left):
+    def forward(self, agents, agent_locs, agent_ctrs, control, pre, right, suc, turn, intersect, ctrs, feats, left,
+                a2m, m2a, a2a):
         # construct agent feature
-        agents, agent_locs, agent_ctrs = agent_gather(gpu(trajs_obs), gpu(pad_obs))
-        agents, d_agent_ctrs = self.agent_encoder(agents, agent_locs)
-        agent_ctrs = get_agent_ctrs(d_agent_ctrs, agent_ctrs)
+        agents, d_agent_ctrs = self.agent_encoder(gpu(agents), gpu(agent_locs))
+        agent_ctrs = get_agent_ctrs(d_agent_ctrs, gpu(agent_ctrs))
 
         # construct map features
         nodes, node_ctrs = self.map_encoder(gpu(control), to_long(gpu(pre)), to_long(gpu(right)),
@@ -34,9 +34,9 @@ class Net(nn.Module):
                                             gpu(feats), to_long(gpu(left)))
 
         # interactions
-        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs)
-        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs)
-        agents = self.a2a(agents, agent_ctrs)
+        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs, a2m)
+        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs, m2a)
+        agents = self.a2a(agents, agent_ctrs, a2a)
 
         # prediction
         out = self.pyramid_decoder(agents, agent_ctrs)
@@ -46,23 +46,6 @@ class Net(nn.Module):
 def get_agent_ctrs(d_agent_ctrs, agent_ctrs):
     agent_ctrs = agent_ctrs + d_agent_ctrs
     return agent_ctrs
-
-
-def agent_gather(trajs_obs, pad_obs):
-    feats = torch.zeros_like(trajs_obs)
-    feats[:, 1:, :] = trajs_obs[:, 1:, :] - trajs_obs[:, :-1, :]
-    agents = torch.cat([feats, pad_obs.unsqueeze(2)], dim=-1)
-    agent_locs = torch.cat([trajs_obs, pad_obs.unsqueeze(2)], dim=-1)
-
-    agents = agents.transpose(1, 2)
-    agents[:, :2] *= agents[:, -1:]
-    agents[:, :2, 1:] *= agents[:, -1:, :-1]
-
-    agent_locs = agent_locs.transpose(1, 2)
-    agent_locs[:, :2] *= agent_locs[:, -1:]
-
-    agent_ctrs = agent_locs[:, :2, -1]
-    return agents, agent_locs, agent_ctrs
 
 
 class Loss(nn.Module):

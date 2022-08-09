@@ -15,14 +15,14 @@ class A2M(nn.Module):
             att.append(Att(n_map, config["n_agent"]))
         self.att = nn.ModuleList(att)
 
-    def forward(self, feat, ctrs, agents, agent_ctrs):
+    def forward(self, feat, ctrs, agents, agent_ctrs, a2m):
         for i in range(len(self.att)):
             feat = self.att[i](
                 feat,
                 ctrs,
                 agents,
                 agent_ctrs,
-                self.config["agent2map_dist"],
+                a2m,
             )
         return feat
 
@@ -40,14 +40,14 @@ class M2A(nn.Module):
             att.append(Att(n_agent, n_map))
         self.att = nn.ModuleList(att)
 
-    def forward(self, agents, agent_ctrs, nodes, node_ctrs):
+    def forward(self, agents, agent_ctrs, nodes, node_ctrs, m2a):
         for i in range(len(self.att)):
             agents = self.att[i](
                 agents,
                 agent_ctrs,
                 nodes,
                 node_ctrs,
-                self.config["map2agent_dist"],
+                m2a,
             )
         return agents
 
@@ -64,14 +64,14 @@ class A2A(nn.Module):
             att.append(Att(n_agent, n_agent))
         self.att = nn.ModuleList(att)
 
-    def forward(self, agents, agent_ctrs):
+    def forward(self, agents, agent_ctrs, a2a):
         for i in range(len(self.att)):
             agents = self.att[i](
                 agents,
                 agent_ctrs,
                 agents,
                 agent_ctrs,
-                self.config["agent2agent_dist"],
+                a2a,
             )
         return agents
 
@@ -104,15 +104,11 @@ class Att(nn.Module):
             nn.Linear(n_agt, n_agt, bias=False),
         )
 
-    def forward(self, agts, agt_ctrs, ctx, ctx_ctrs, dist_th):
+    def forward(self, agts, agt_ctrs, ctx, ctx_ctrs, x2x):
         res = agts
 
-        dist = agt_ctrs.view(-1, 1, 2) - ctx_ctrs.view(1, -1, 2)
-        dist = torch.sqrt((dist ** 2).sum(2))
-        mask = dist <= dist_th
-        ids = torch.nonzero(mask, as_tuple=False)
-        hi = ids[:, 0]
-        wi = ids[:, 1]
+        hi = x2x[0]
+        wi = x2x[1]
 
         dist = agt_ctrs[hi] - ctx_ctrs[wi]
         dist = self.dist(dist)

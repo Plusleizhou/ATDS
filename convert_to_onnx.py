@@ -18,6 +18,31 @@ torch.manual_seed(SEED)
 
 
 def get_dummy_input():
+    def get_interaction_indexes(agt_ctrs, ctx_ctrs, dist_th):
+        dist = agt_ctrs.view(-1, 1, 2) - ctx_ctrs.view(1, -1, 2)
+        dist = torch.sqrt((dist ** 2).sum(2))
+        mask = dist <= dist_th
+        ids = torch.nonzero(mask, as_tuple=False)
+        hi = ids[:, 0]
+        wi = ids[:, 1]
+        return hi, wi
+
+    def agent_gather(trajs_obs, pad_obs):
+        feats = torch.zeros_like(trajs_obs)
+        feats[:, 1:, :] = trajs_obs[:, 1:, :] - trajs_obs[:, :-1, :]
+        agts = torch.cat([feats, pad_obs.unsqueeze(2)], dim=-1)
+        agt_locs = torch.cat([trajs_obs, pad_obs.unsqueeze(2)], dim=-1)
+
+        agts = agts.transpose(1, 2)
+        agts[:, :2] *= agts[:, -1:]
+        agts[:, :2, 1:] *= agts[:, -1:, :-1]
+
+        agt_locs = agt_locs.transpose(1, 2)
+        agt_locs[:, :2] *= agt_locs[:, -1:]
+
+        agt_ctrs = agt_locs[:, :2, -1]
+        return agts, agt_locs, agt_ctrs
+
     dataset = ProcessedDataset(config["processed_val"], mode="val")
     val_dataloader = DataLoader(dataset,
                                 batch_size=1,
@@ -29,34 +54,43 @@ def get_dummy_input():
     batch = val_dataloader.next()
     dummy_input = list()
     tmp = list()
-    for key in batch.keys():
-        if key in ["trajs_obs", "pad_obs"]:
-            dummy_input.append(batch[key][0])
-        if key == "graph":
-            graph = batch["graph"][0]
 
-            dummy_input.append(graph["control"])
+    # agents
+    agents, agent_locs, agent_ctrs = agent_gather(batch["trajs_obs"][0], batch["pad_obs"][0])
+    dummy_input.append(agents)
+    dummy_input.append(agent_locs)
+    dummy_input.append(agent_ctrs)
 
-            for i in range(len(graph["pre"])):
-                tmp.append((graph["pre"][i]["u"].type(torch.int64),
-                            graph["pre"][i]["v"].type(torch.int64)))
-            dummy_input.append(tuple(tmp))
+    # hd_maps
+    graph = batch["graph"][0]
 
-            dummy_input.append((graph["right"]["u"].type(torch.int64),
-                                graph["right"]["v"].type(torch.int64)))
+    dummy_input.append(graph["control"])
 
-            tmp = list()
-            for i in range(len(graph["suc"])):
-                tmp.append((graph["suc"][i]["u"].type(torch.int64),
-                            graph["suc"][i]["v"].type(torch.int64)))
-            dummy_input.append(tuple(tmp))
+    for i in range(len(graph["pre"])):
+        tmp.append((graph["pre"][i]["u"].type(torch.int64),
+                    graph["pre"][i]["v"].type(torch.int64)))
+    dummy_input.append(tuple(tmp))
 
-            dummy_input.append(graph["turn"])
-            dummy_input.append(graph["intersect"])
-            dummy_input.append(graph["ctrs"])
-            dummy_input.append(graph["feats"])
-            dummy_input.append((graph["left"]["u"].type(torch.int64),
-                                graph["left"]["v"].type(torch.int64)))
+    dummy_input.append((graph["right"]["u"].type(torch.int64),
+                        graph["right"]["v"].type(torch.int64)))
+
+    tmp = list()
+    for i in range(len(graph["suc"])):
+        tmp.append((graph["suc"][i]["u"].type(torch.int64),
+                    graph["suc"][i]["v"].type(torch.int64)))
+    dummy_input.append(tuple(tmp))
+
+    dummy_input.append(graph["turn"])
+    dummy_input.append(graph["intersect"])
+    dummy_input.append(graph["ctrs"])
+    dummy_input.append(graph["feats"])
+    dummy_input.append((graph["left"]["u"].type(torch.int64),
+                        graph["left"]["v"].type(torch.int64)))
+    agent_ctrs = batch["trajs_obs"][0][:, -1, :2]
+    node_ctrs = graph["ctrs"][:, :2]
+    dummy_input.append(get_interaction_indexes(node_ctrs, agent_ctrs, config["agent2map_dist"]))
+    dummy_input.append(get_interaction_indexes(agent_ctrs, node_ctrs, config["map2agent_dist"]))
+    dummy_input.append(get_interaction_indexes(agent_ctrs, agent_ctrs, config["agent2agent_dist"]))
     return tuple(dummy_input)
 
 
@@ -85,7 +119,7 @@ def load_model():
 
 def convert():
     model = load_model()
-    input_names = ["trajs_obs", "pad_obs", "control",
+    input_names = ["agents", "agent_locs", "agent_ctrs", "control",
                    "pre_0_u", "pre_0_v", "pre_1_u", "pre_1_v", "pre_2_u", "pre_2_v",
                    "pre_3_u", "pre_3_v", "pre_4_u", "pre_4_v", "pre_5_u", "pre_5_v",
                    "right_u", "right_v",
@@ -93,10 +127,11 @@ def convert():
                    "suc_3_u", "suc_3_v", "suc_4_u", "suc_4_v", "suc_5_u", "suc_5_v",
                    "turn", "intersect",
                    "ctrs", "feats",
-                   "left_u", "left_v"]
+                   "left_u", "left_v",
+                   "a2m_u", "a2m_v", "m2a_u", "m2a_v", "a2a_u", "a2a_v"]
     output_names = ["cls", "reg", "key_points"]
 
-    dynamic_axes = {"trajs_obs": [0], "pad_obs": [0], "control": [0],
+    dynamic_axes = {"agents": [0], "agent_locs": [0], "agent_ctrs": [0], "control": [0],
                     "pre_0_u": [0], "pre_0_v": [0], "pre_1_u": [0], "pre_1_v": [0], "pre_2_u": [0], "pre_2_v": [0],
                     "pre_3_u": [0], "pre_3_v": [0], "pre_4_u": [0], "pre_4_v": [0], "pre_5_u": [0], "pre_5_v": [0],
                     "right_u": [0], "right_v": [0],
@@ -104,7 +139,8 @@ def convert():
                     "suc_3_u": [0], "suc_3_v": [0], "suc_4_u": [0], "suc_4_v": [0], "suc_5_u": [0], "suc_5_v": [0],
                     "turn": [0], "intersect": [0],
                     "ctrs": [0], "feats": [0],
-                    "left_u": [0], "left_v": [0]}
+                    "left_u": [0], "left_v": [0],
+                    "a2m_u": [0], "a2m_v": [0], "m2a_u": [0], "m2a_v": [0], "a2a_u": [0], "a2a_v": [0]}
 
     torch.onnx.export(model, get_dummy_input(), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
                       output_names=output_names, dynamic_axes=dynamic_axes)
@@ -155,41 +191,48 @@ def run_onnx():
 
     dummy_input = to_numpy(get_dummy_input())
     inputs = {
-        "trajs_obs": dummy_input[0],
-        "pad_obs": dummy_input[1],
-        "control": dummy_input[2],
-        "pre_0_u": dummy_input[3][0][0],
-        "pre_0_v": dummy_input[3][0][1],
-        "pre_1_u": dummy_input[3][1][0],
-        "pre_1_v": dummy_input[3][1][1],
-        "pre_2_u": dummy_input[3][2][0],
-        "pre_2_v": dummy_input[3][2][1],
-        "pre_3_u": dummy_input[3][3][0],
-        "pre_3_v": dummy_input[3][3][1],
-        "pre_4_u": dummy_input[3][4][0],
-        "pre_4_v": dummy_input[3][4][1],
-        "pre_5_u": dummy_input[3][5][0],
-        "pre_5_v": dummy_input[3][5][1],
-        "right_u": dummy_input[4][0],
-        "right_v": dummy_input[4][1],
-        "suc_0_u": dummy_input[5][0][0],
-        "suc_0_v": dummy_input[5][0][1],
-        "suc_1_u": dummy_input[5][1][0],
-        "suc_1_v": dummy_input[5][1][1],
-        "suc_2_u": dummy_input[5][2][0],
-        "suc_2_v": dummy_input[5][2][1],
-        "suc_3_u": dummy_input[5][3][0],
-        "suc_3_v": dummy_input[5][3][1],
-        "suc_4_u": dummy_input[5][4][0],
-        "suc_4_v": dummy_input[5][4][1],
-        "suc_5_u": dummy_input[5][5][0],
-        "suc_5_v": dummy_input[5][5][1],
-        "turn": dummy_input[6],
-        "intersect": dummy_input[7],
-        "ctrs": dummy_input[8],
-        "feats": dummy_input[9],
-        "left_u": dummy_input[10][0],
-        "left_v": dummy_input[10][1],
+        "agents": dummy_input[0],
+        "agent_locs": dummy_input[1],
+        "agent_ctrs": dummy_input[2],
+        "control": dummy_input[3],
+        "pre_0_u": dummy_input[4][0][0],
+        "pre_0_v": dummy_input[4][0][1],
+        "pre_1_u": dummy_input[4][1][0],
+        "pre_1_v": dummy_input[4][1][1],
+        "pre_2_u": dummy_input[4][2][0],
+        "pre_2_v": dummy_input[4][2][1],
+        "pre_3_u": dummy_input[4][3][0],
+        "pre_3_v": dummy_input[4][3][1],
+        "pre_4_u": dummy_input[4][4][0],
+        "pre_4_v": dummy_input[4][4][1],
+        "pre_5_u": dummy_input[4][5][0],
+        "pre_5_v": dummy_input[4][5][1],
+        "right_u": dummy_input[5][0],
+        "right_v": dummy_input[5][1],
+        "suc_0_u": dummy_input[6][0][0],
+        "suc_0_v": dummy_input[6][0][1],
+        "suc_1_u": dummy_input[6][1][0],
+        "suc_1_v": dummy_input[6][1][1],
+        "suc_2_u": dummy_input[6][2][0],
+        "suc_2_v": dummy_input[6][2][1],
+        "suc_3_u": dummy_input[6][3][0],
+        "suc_3_v": dummy_input[6][3][1],
+        "suc_4_u": dummy_input[6][4][0],
+        "suc_4_v": dummy_input[6][4][1],
+        "suc_5_u": dummy_input[6][5][0],
+        "suc_5_v": dummy_input[6][5][1],
+        "turn": dummy_input[7],
+        "intersect": dummy_input[8],
+        "ctrs": dummy_input[9],
+        "feats": dummy_input[10],
+        "left_u": dummy_input[11][0],
+        "left_v": dummy_input[11][1],
+        "a2m_u": dummy_input[12][0],
+        "a2m_v": dummy_input[12][1],
+        "m2a_u": dummy_input[13][0],
+        "m2a_v": dummy_input[13][1],
+        "a2a_u": dummy_input[14][0],
+        "a2a_v": dummy_input[14][1],
     }
     start_time = time.time()
     for i in range(100):
