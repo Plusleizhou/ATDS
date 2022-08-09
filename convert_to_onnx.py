@@ -28,14 +28,15 @@ def get_dummy_input():
         return hi, wi
 
     def agent_gather(trajs_obs, pad_obs):
-        feats = torch.zeros_like(trajs_obs)
-        feats[:, 1:, :] = trajs_obs[:, 1:, :] - trajs_obs[:, :-1, :]
-        agts = torch.cat([feats, pad_obs.unsqueeze(2)], dim=-1)
-        agt_locs = torch.cat([trajs_obs, pad_obs.unsqueeze(2)], dim=-1)
+        feats = torch.zeros_like(trajs_obs[:, :, :2])
+        feats[:, 1:, :] = trajs_obs[:, 1:, :2] - trajs_obs[:, :-1, :2]
+        agts = torch.cat([feats, trajs_obs[:, :, 2:4] / 10.0, trajs_obs[:, :, 4:],
+                          pad_obs.unsqueeze(2)], dim=-1)
+        agt_locs = torch.cat([trajs_obs[:, :, :2], pad_obs.unsqueeze(2)], dim=-1)
 
         agts = agts.transpose(1, 2)
-        agts[:, :2] *= agts[:, -1:]
-        agts[:, :2, 1:] *= agts[:, -1:, :-1]
+        agts[:, :-1] *= agts[:, -1:]
+        agts[:, :-1, 1:] *= agts[:, -1:, :-1]
 
         agt_locs = agt_locs.transpose(1, 2)
         agt_locs[:, :2] *= agt_locs[:, -1:]
@@ -43,7 +44,7 @@ def get_dummy_input():
         agt_ctrs = agt_locs[:, :2, -1]
         return agts, agt_locs, agt_ctrs
 
-    dataset = ProcessedDataset(config["processed_val"], mode="val")
+    dataset = ProcessedDataset("./data/features/benchmark/", mode="val")
     val_dataloader = DataLoader(dataset,
                                 batch_size=1,
                                 num_workers=config['val_workers'],
@@ -112,7 +113,7 @@ def load_model():
     model = Net(config)
     model = model.to(device=device)
 
-    load_checkpoint(config["save_dir"] + "1.pth", model)
+    load_checkpoint(config["save_dir"] + "2.pth", model)
     model.eval()
     return model
 
@@ -129,7 +130,7 @@ def convert():
                    "ctrs", "feats",
                    "left_u", "left_v",
                    "a2m_u", "a2m_v", "m2a_u", "m2a_v", "a2a_u", "a2a_v"]
-    output_names = ["cls", "reg", "key_points"]
+    output_names = ["reg", "key_points"]
 
     dynamic_axes = {"agents": [0], "agent_locs": [0], "agent_ctrs": [0], "control": [0],
                     "pre_0_u": [0], "pre_0_v": [0], "pre_1_u": [0], "pre_1_v": [0], "pre_2_u": [0], "pre_2_v": [0],
@@ -168,8 +169,8 @@ def run_torch():
 
     out = model(*dummy_input)
     # print(model)
-    print(f"cls: {out['cls'].shape}, reg: {out['reg'].shape}, key_points: {out['key_points'].shape}")
-    print(out['cls'][0])
+    print(f"reg: {out['reg'].shape}, key_points: {out['key_points'].shape}")
+    print(out['key_points'][0, 0, 0])
     return out
 
 
@@ -240,11 +241,11 @@ def run_onnx():
     print("onnx model results".center(50, "-"))
     print(f"Average time for inference once: {round((time.time() - start_time) * 10, 3)} ms")
     print([x.shape for x in ort_outs])
-    print(ort_outs[0][0])
+    print(ort_outs[1][0, 0, 0])
 
     print("torch model results".center(50, "-"))
     torch_out = run_torch()
-    np.testing.assert_allclose(to_numpy(torch_out["cls"]), ort_outs[0], rtol=1e-03, atol=1e-05)
+    np.testing.assert_allclose(to_numpy(torch_out["key_points"]), ort_outs[1], rtol=1e-03, atol=1e-05)
 
 
 def get_args():

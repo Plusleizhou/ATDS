@@ -8,7 +8,7 @@ model_name = "log-0"
 config["n_agent"] = 128
 config["n_map"] = 128
 
-config["num_mods"] = 6
+config["num_mods"] = 1
 config["num_preds"] = 30
 config["num_obs"] = 20
 config["agent2map_dist"] = 15.0

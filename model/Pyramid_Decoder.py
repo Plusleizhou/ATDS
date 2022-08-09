@@ -18,13 +18,8 @@ class AttDest(nn.Module):
         self.agt = Linear(2 * n_agt, n_agt, ng=ng)
 
     def forward(self, agts, agt_ctrs, dest_ctrs):
-        n_agt = agts.size()[1]
-        num_mods = dest_ctrs.size()[1]
-
         dist = (agt_ctrs.unsqueeze(1) - dest_ctrs).view(-1, 2)
         dist = self.dist(dist)
-        agts = agts.unsqueeze(1).repeat(1, num_mods, 1).view(-1, n_agt)
-
         agts = torch.cat((dist, agts), 1)
         agts = self.agt(agts)
         return agts
@@ -76,39 +71,16 @@ class PyramidDecoder(nn.Module):
             pred.append(TrajectoryDecoder([n_agent, 64, 32, 16], [30, 3, 1]))
         self.pred = nn.ModuleList(pred)
 
-        self.att_dest = AttDest(n_agent)
-        self.cls = nn.Sequential(
-            LinearRes(n_agent, n_agent, ng=ng), nn.Linear(n_agent, 1)
-        )
-
     def forward(self, agents, agent_ctrs):
-        preds = []
-        for i in range(len(self.pred)):
-            preds.append(self.pred[i](agents))
-        out = []
-        for i in range(3):
-            out.append(torch.cat([x[i] for x in preds], dim=1))
-        reg = out[-1]
-        key_points = torch.cat([out[0], out[1]], dim=-2)
+        preds = self.pred[0](agents)
+        reg = preds[-1]
+        key_points = torch.cat([preds[0], preds[1]], dim=-2)
 
         ctrs = agent_ctrs.view(-1, 1, 1, 2)
         reg = reg + ctrs
         key_points = key_points + ctrs
 
-        dst_ctrs = reg[:, :, -1].detach()
-        feats = self.att_dest(agents, agent_ctrs, dst_ctrs)
-        cls1 = self.cls(feats).view(-1, self.config["num_mods"])
-        cls = torch.softmax(cls1, dim=-1)
-
-        cls, sort_ids = cls.sort(1, descending=True)
-        row_ids = torch.arange(sort_ids.shape[0]).long().to(sort_ids.device)
-        row_ids = row_ids.view(-1, 1).repeat(1, sort_ids.size(1)).view(-1)
-        sort_ids = sort_ids.view(-1)
-        reg = reg[row_ids, sort_ids].view(cls.size(0), cls.size(1), -1, 2)
-        key_points = key_points[row_ids, sort_ids].view(cls.size(0), cls.size(1), -1, 2)
-
         out = dict()
-        out['cls'] = cls
         out['reg'] = reg
         out['key_points'] = key_points
         return out

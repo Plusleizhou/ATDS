@@ -12,7 +12,7 @@ class AgentEncoder(nn.Module):
         self.config = config
         ng = 1
 
-        n_in = 3
+        n_in = 6
         n_out = [32, 64, 128]
         blocks = [Res1d, Res1d, Res1d]
         num_blocks = [2, 2, 2]

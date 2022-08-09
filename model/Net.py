@@ -34,9 +34,9 @@ class Net(nn.Module):
                                             gpu(feats), to_long(gpu(left)))
 
         # interactions
-        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs, a2m)
-        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs, m2a)
-        agents = self.a2a(agents, agent_ctrs, a2a)
+        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs, gpu(a2m))
+        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs, gpu(m2a))
+        agents = self.a2a(agents, agent_ctrs, gpu(a2a))
 
         # prediction
         out = self.pyramid_decoder(agents, agent_ctrs)
