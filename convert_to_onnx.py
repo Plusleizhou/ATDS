@@ -11,6 +11,7 @@ from processed_data import ProcessedDataset, collate_fn
 from torch.utils.data import DataLoader
 from model.Net import Net
 from load_config import config
+from utils import gpu
 
 SEED = 13
 np.random.seed(SEED)
@@ -21,11 +22,8 @@ def get_dummy_input():
     def get_interaction_indexes(agt_ctrs, ctx_ctrs, dist_th):
         dist = agt_ctrs.view(-1, 1, 2) - ctx_ctrs.view(1, -1, 2)
         dist = torch.sqrt((dist ** 2).sum(2))
-        mask = dist <= dist_th
-        ids = torch.nonzero(mask, as_tuple=False)
-        hi = ids[:, 0]
-        wi = ids[:, 1]
-        return hi, wi
+        roi = dist <= dist_th
+        return torch.nonzero(roi, as_tuple=False)
 
     def agent_gather(trajs_obs, pad_obs):
         feats = torch.zeros_like(trajs_obs[:, :, :2])
@@ -41,8 +39,8 @@ def get_dummy_input():
         agt_locs = agt_locs.transpose(1, 2)
         agt_locs[:, :2] *= agt_locs[:, -1:]
 
-        agt_ctrs = agt_locs[:, :2, -1]
-        return agts, agt_locs, agt_ctrs
+        agts = torch.cat([agts, agt_locs], dim=1)
+        return agts
 
     dataset = ProcessedDataset("./data/features/benchmark/", mode="val")
     val_dataloader = DataLoader(dataset,
@@ -51,47 +49,76 @@ def get_dummy_input():
                                 shuffle=False,
                                 collate_fn=collate_fn)
     val_dataloader = val_dataloader.__iter__()
-    # batch = val_dataloader.next()
+    for i in range(0):
+        batch = val_dataloader.next()
     batch = val_dataloader.next()
     dummy_input = list()
-    tmp = list()
+
+    # mask
+    mask = torch.zeros(19, dtype=torch.int64)
 
     # agents
-    agents, agent_locs, agent_ctrs = agent_gather(batch["trajs_obs"][0], batch["pad_obs"][0])
-    dummy_input.append(agents)
-    dummy_input.append(agent_locs)
-    dummy_input.append(agent_ctrs)
+    agents_pad = torch.zeros(32, 9, 20)
+    agents = agent_gather(batch["trajs_obs"][0], batch["pad_obs"][0])
+    agents_pad[:agents.shape[0]] = agents
+    mask[0] = agents.shape[0]
+    dummy_input.append(agents_pad)
 
     # hd_maps
     graph = batch["graph"][0]
 
-    dummy_input.append(graph["control"])
+    nodes_pad = torch.zeros(900, 8)
+    nodes = torch.cat(
+            (
+                graph["ctrs"],
+                graph["feats"],
+                graph["turn"],
+                graph["control"].unsqueeze(1),
+                graph["intersect"].unsqueeze(1),
+            ),
+            1,
+    )
+    nodes_pad[:nodes.shape[0]] = nodes
+    mask[1] = nodes.shape[0]
+    dummy_input.append(nodes_pad)
 
+    map_indexes = torch.zeros(nodes_pad.shape[0], 28, dtype=torch.int64)
     for i in range(len(graph["pre"])):
-        tmp.append((graph["pre"][i]["u"].type(torch.int64),
-                    graph["pre"][i]["v"].type(torch.int64)))
-    dummy_input.append(tuple(tmp))
+        map_indexes[:graph["pre"][i]["u"].shape[0], 2 * i] = graph["pre"][i]["u"].type(torch.int64)
+        map_indexes[:graph["pre"][i]["v"].shape[0], 2 * i + 1] = graph["pre"][i]["v"].type(torch.int64)
+        mask[2 + i] = graph["pre"][i]["v"].shape[0]
 
-    dummy_input.append((graph["right"]["u"].type(torch.int64),
-                        graph["right"]["v"].type(torch.int64)))
+    map_indexes[:graph["right"]["u"].shape[0], 12] = graph["right"]["u"].type(torch.int64)
+    map_indexes[:graph["right"]["v"].shape[0], 13] = graph["right"]["v"].type(torch.int64)
+    mask[8] = graph["right"]["v"].shape[0]
 
-    tmp = list()
     for i in range(len(graph["suc"])):
-        tmp.append((graph["suc"][i]["u"].type(torch.int64),
-                    graph["suc"][i]["v"].type(torch.int64)))
-    dummy_input.append(tuple(tmp))
+        map_indexes[:graph["suc"][i]["u"].shape[0], 14 + 2 * i] = graph["suc"][i]["u"].type(torch.int64)
+        map_indexes[:graph["suc"][i]["v"].shape[0], 15 + 2 * i] = graph["suc"][i]["v"].type(torch.int64)
+        mask[9 + i] = graph["suc"][i]["v"].shape[0]
 
-    dummy_input.append(graph["turn"])
-    dummy_input.append(graph["intersect"])
-    dummy_input.append(graph["ctrs"])
-    dummy_input.append(graph["feats"])
-    dummy_input.append((graph["left"]["u"].type(torch.int64),
-                        graph["left"]["v"].type(torch.int64)))
+    map_indexes[:graph["left"]["u"].shape[0], 26] = graph["left"]["u"].type(torch.int64)
+    map_indexes[:graph["left"]["v"].shape[0], 27] = graph["left"]["v"].type(torch.int64)
+    mask[15] = graph["left"]["v"].shape[0]
+    dummy_input.append(map_indexes)
+
+    action_indexes = torch.zeros(nodes_pad.shape[0], 6, dtype=torch.int64)
     agent_ctrs = batch["trajs_obs"][0][:, -1, :2]
     node_ctrs = graph["ctrs"][:, :2]
-    dummy_input.append(get_interaction_indexes(node_ctrs, agent_ctrs, config["agent2map_dist"]))
-    dummy_input.append(get_interaction_indexes(agent_ctrs, node_ctrs, config["map2agent_dist"]))
-    dummy_input.append(get_interaction_indexes(agent_ctrs, agent_ctrs, config["agent2agent_dist"]))
+    ids = get_interaction_indexes(node_ctrs, agent_ctrs, config["agent2map_dist"])
+    action_indexes[:ids.shape[0], :2] = ids
+    mask[16] = ids.shape[0]
+    ids = get_interaction_indexes(agent_ctrs, node_ctrs, config["map2agent_dist"])
+    action_indexes[:ids.shape[0], 2:4] = ids
+    mask[17] = ids.shape[0]
+    ids = get_interaction_indexes(agent_ctrs, agent_ctrs, config["agent2agent_dist"])
+    action_indexes[:ids.shape[0], 4:] = ids
+    mask[18] = ids.shape[0]
+    dummy_input.append(action_indexes)
+
+    dummy_input.append(mask)
+
+    dummy_input = gpu(dummy_input)
     return tuple(dummy_input)
 
 
@@ -120,31 +147,11 @@ def load_model():
 
 def convert():
     model = load_model()
-    input_names = ["agents", "agent_locs", "agent_ctrs", "control",
-                   "pre_0_u", "pre_0_v", "pre_1_u", "pre_1_v", "pre_2_u", "pre_2_v",
-                   "pre_3_u", "pre_3_v", "pre_4_u", "pre_4_v", "pre_5_u", "pre_5_v",
-                   "right_u", "right_v",
-                   "suc_0_u", "suc_0_v", "suc_1_u", "suc_1_v", "suc_2_u", "suc_2_v",
-                   "suc_3_u", "suc_3_v", "suc_4_u", "suc_4_v", "suc_5_u", "suc_5_v",
-                   "turn", "intersect",
-                   "ctrs", "feats",
-                   "left_u", "left_v",
-                   "a2m_u", "a2m_v", "m2a_u", "m2a_v", "a2a_u", "a2a_v"]
+    input_names = ["agents", "nodes", "map_indexes", "action_indexes", "mask"]
     output_names = ["reg", "key_points"]
 
-    dynamic_axes = {"agents": [0], "agent_locs": [0], "agent_ctrs": [0], "control": [0],
-                    "pre_0_u": [0], "pre_0_v": [0], "pre_1_u": [0], "pre_1_v": [0], "pre_2_u": [0], "pre_2_v": [0],
-                    "pre_3_u": [0], "pre_3_v": [0], "pre_4_u": [0], "pre_4_v": [0], "pre_5_u": [0], "pre_5_v": [0],
-                    "right_u": [0], "right_v": [0],
-                    "suc_0_u": [0], "suc_0_v": [0], "suc_1_u": [0], "suc_1_v": [0], "suc_2_u": [0], "suc_2_v": [0],
-                    "suc_3_u": [0], "suc_3_v": [0], "suc_4_u": [0], "suc_4_v": [0], "suc_5_u": [0], "suc_5_v": [0],
-                    "turn": [0], "intersect": [0],
-                    "ctrs": [0], "feats": [0],
-                    "left_u": [0], "left_v": [0],
-                    "a2m_u": [0], "a2m_v": [0], "m2a_u": [0], "m2a_v": [0], "a2a_u": [0], "a2a_v": [0]}
-
     torch.onnx.export(model, get_dummy_input(), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
-                      output_names=output_names, dynamic_axes=dynamic_axes)
+                      output_names=output_names)
 
 
 def simplify_onnx():
@@ -193,47 +200,10 @@ def run_onnx():
     dummy_input = to_numpy(get_dummy_input())
     inputs = {
         "agents": dummy_input[0],
-        "agent_locs": dummy_input[1],
-        "agent_ctrs": dummy_input[2],
-        "control": dummy_input[3],
-        "pre_0_u": dummy_input[4][0][0],
-        "pre_0_v": dummy_input[4][0][1],
-        "pre_1_u": dummy_input[4][1][0],
-        "pre_1_v": dummy_input[4][1][1],
-        "pre_2_u": dummy_input[4][2][0],
-        "pre_2_v": dummy_input[4][2][1],
-        "pre_3_u": dummy_input[4][3][0],
-        "pre_3_v": dummy_input[4][3][1],
-        "pre_4_u": dummy_input[4][4][0],
-        "pre_4_v": dummy_input[4][4][1],
-        "pre_5_u": dummy_input[4][5][0],
-        "pre_5_v": dummy_input[4][5][1],
-        "right_u": dummy_input[5][0],
-        "right_v": dummy_input[5][1],
-        "suc_0_u": dummy_input[6][0][0],
-        "suc_0_v": dummy_input[6][0][1],
-        "suc_1_u": dummy_input[6][1][0],
-        "suc_1_v": dummy_input[6][1][1],
-        "suc_2_u": dummy_input[6][2][0],
-        "suc_2_v": dummy_input[6][2][1],
-        "suc_3_u": dummy_input[6][3][0],
-        "suc_3_v": dummy_input[6][3][1],
-        "suc_4_u": dummy_input[6][4][0],
-        "suc_4_v": dummy_input[6][4][1],
-        "suc_5_u": dummy_input[6][5][0],
-        "suc_5_v": dummy_input[6][5][1],
-        "turn": dummy_input[7],
-        "intersect": dummy_input[8],
-        "ctrs": dummy_input[9],
-        "feats": dummy_input[10],
-        "left_u": dummy_input[11][0],
-        "left_v": dummy_input[11][1],
-        "a2m_u": dummy_input[12][0],
-        "a2m_v": dummy_input[12][1],
-        "m2a_u": dummy_input[13][0],
-        "m2a_v": dummy_input[13][1],
-        "a2a_u": dummy_input[14][0],
-        "a2a_v": dummy_input[14][1],
+        "nodes": dummy_input[1],
+        "map_indexes": dummy_input[2],
+        "action_indexes": dummy_input[3],
+        "mask": dummy_input[4]
     }
     start_time = time.time()
     for i in range(100):

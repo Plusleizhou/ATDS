@@ -107,8 +107,8 @@ class Att(nn.Module):
     def forward(self, agts, agt_ctrs, ctx, ctx_ctrs, x2x):
         res = agts
 
-        hi = x2x[0]
-        wi = x2x[1]
+        hi = x2x[:, 0]
+        wi = x2x[:, 1]
 
         dist = agt_ctrs[hi] - ctx_ctrs[wi]
         dist = self.dist(dist)
@@ -127,9 +127,9 @@ class Att(nn.Module):
         out = self.to_out(out)
 
         agts = self.agt(agts)
-        # agts.index_add_(0, hi, out)
+        agts.index_add_(0, hi, out)
         # agts.scatter_add_(0, hi.unsqueeze(1).repeat(1, 128), out)
-        agts = index_add_naive(agts, out, hi)
+        # agts = index_add_naive(agts, out, hi)
         agts = self.norm(agts)
         agts = self.relu(agts)
 

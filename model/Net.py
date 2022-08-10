@@ -22,21 +22,22 @@ class Net(nn.Module):
 
         self.pyramid_decoder = PyramidDecoder(config)
 
-    def forward(self, agents, agent_locs, agent_ctrs, control, pre, right, suc, turn, intersect, ctrs, feats, left,
-                a2m, m2a, a2a):
+    def forward(self, agents, nodes, map_indexes, action_indexes, mask):
+        # extract useful info
+        agents = agents[:mask[0]]
+        nodes = nodes[:mask[1]]
         # construct agent feature
-        agents, d_agent_ctrs = self.agent_encoder(gpu(agents), gpu(agent_locs))
-        agent_ctrs = get_agent_ctrs(d_agent_ctrs, gpu(agent_ctrs))
+        agent_ctrs = agents[:, 6:8, 19]
+        agents, d_agent_ctrs = self.agent_encoder(agents[:, :6], agents[:, 6:])
+        agent_ctrs = get_agent_ctrs(d_agent_ctrs, agent_ctrs)
 
         # construct map features
-        nodes, node_ctrs = self.map_encoder(gpu(control), to_long(gpu(pre)), to_long(gpu(right)),
-                                            to_long(gpu(suc)), gpu(turn), gpu(intersect), gpu(ctrs),
-                                            gpu(feats), to_long(gpu(left)))
+        nodes, node_ctrs = self.map_encoder(nodes, map_indexes, mask[2:16])
 
         # interactions
-        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs, gpu(a2m))
-        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs, gpu(m2a))
-        agents = self.a2a(agents, agent_ctrs, gpu(a2a))
+        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs, action_indexes[:mask[16], :2])
+        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs, action_indexes[:mask[17], 2:4])
+        agents = self.a2a(agents, agent_ctrs, action_indexes[:mask[18], 4:6])
 
         # prediction
         out = self.pyramid_decoder(agents, agent_ctrs)
