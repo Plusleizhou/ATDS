@@ -54,20 +54,20 @@ def get_dummy_input():
     batch = val_dataloader.next()
     dummy_input = list()
 
-    # mask
-    mask = torch.zeros(19, dtype=torch.int64)
+    # max num of nodes
+    agents_num = 32
+    nodes_num = 1000
 
     # agents
-    agents_pad = torch.zeros(32, 9, 20)
+    agents_pad = torch.zeros(agents_num, 9, 20)
     agents = agent_gather(batch["trajs_obs"][0], batch["pad_obs"][0])
     agents_pad[:agents.shape[0]] = agents
-    mask[0] = agents.shape[0]
     dummy_input.append(agents_pad)
 
     # hd_maps
     graph = batch["graph"][0]
 
-    nodes_pad = torch.zeros(900, 8)
+    nodes_pad = torch.zeros(nodes_num, 8)
     nodes = torch.cat(
             (
                 graph["ctrs"],
@@ -79,44 +79,38 @@ def get_dummy_input():
             1,
     )
     nodes_pad[:nodes.shape[0]] = nodes
-    mask[1] = nodes.shape[0]
     dummy_input.append(nodes_pad)
 
-    map_indexes = torch.zeros(nodes_pad.shape[0], 28, dtype=torch.int64)
+    # map_indexes = torch.arange(nodes_pad.shape[0], dtype=torch.int64).unsqueeze(1).repeat(1, 28)
+    map_indexes = torch.ones(nodes_pad.shape[0], 28, dtype=torch.int64) * (nodes_num - 1)
     for i in range(len(graph["pre"])):
         map_indexes[:graph["pre"][i]["u"].shape[0], 2 * i] = graph["pre"][i]["u"].type(torch.int64)
         map_indexes[:graph["pre"][i]["v"].shape[0], 2 * i + 1] = graph["pre"][i]["v"].type(torch.int64)
-        mask[2 + i] = graph["pre"][i]["v"].shape[0]
 
     map_indexes[:graph["right"]["u"].shape[0], 12] = graph["right"]["u"].type(torch.int64)
     map_indexes[:graph["right"]["v"].shape[0], 13] = graph["right"]["v"].type(torch.int64)
-    mask[8] = graph["right"]["v"].shape[0]
 
     for i in range(len(graph["suc"])):
         map_indexes[:graph["suc"][i]["u"].shape[0], 14 + 2 * i] = graph["suc"][i]["u"].type(torch.int64)
         map_indexes[:graph["suc"][i]["v"].shape[0], 15 + 2 * i] = graph["suc"][i]["v"].type(torch.int64)
-        mask[9 + i] = graph["suc"][i]["v"].shape[0]
 
     map_indexes[:graph["left"]["u"].shape[0], 26] = graph["left"]["u"].type(torch.int64)
     map_indexes[:graph["left"]["v"].shape[0], 27] = graph["left"]["v"].type(torch.int64)
-    mask[15] = graph["left"]["v"].shape[0]
     dummy_input.append(map_indexes)
 
-    action_indexes = torch.zeros(nodes_pad.shape[0], 6, dtype=torch.int64)
+    action_indexes = torch.ones(nodes_pad.shape[0], 6, dtype=torch.int64)
+    # action_indexes[:, [0, 3]] = torch.arange(nodes_pad.shape[0], dtype=torch.int64).unsqueeze(1).repeat(1, 2)
+    action_indexes[:, [0, 3]] *= (nodes_num - 1)
+    action_indexes[:, [1, 2, 4, 5]] *= (agents_num - 1)
     agent_ctrs = batch["trajs_obs"][0][:, -1, :2]
     node_ctrs = graph["ctrs"][:, :2]
     ids = get_interaction_indexes(node_ctrs, agent_ctrs, config["agent2map_dist"])
     action_indexes[:ids.shape[0], :2] = ids
-    mask[16] = ids.shape[0]
     ids = get_interaction_indexes(agent_ctrs, node_ctrs, config["map2agent_dist"])
     action_indexes[:ids.shape[0], 2:4] = ids
-    mask[17] = ids.shape[0]
     ids = get_interaction_indexes(agent_ctrs, agent_ctrs, config["agent2agent_dist"])
     action_indexes[:ids.shape[0], 4:] = ids
-    mask[18] = ids.shape[0]
     dummy_input.append(action_indexes)
-
-    dummy_input.append(mask)
 
     dummy_input = gpu(dummy_input)
     return tuple(dummy_input)
@@ -147,7 +141,7 @@ def load_model():
 
 def convert():
     model = load_model()
-    input_names = ["agents", "nodes", "map_indexes", "action_indexes", "mask"]
+    input_names = ["agents", "nodes", "map_indexes", "action_indexes"]
     output_names = ["reg", "key_points"]
 
     torch.onnx.export(model, get_dummy_input(), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
@@ -203,7 +197,6 @@ def run_onnx():
         "nodes": dummy_input[1],
         "map_indexes": dummy_input[2],
         "action_indexes": dummy_input[3],
-        "mask": dummy_input[4]
     }
     start_time = time.time()
     for i in range(100):
@@ -237,3 +230,4 @@ if __name__ == "__main__":
         simplify_onnx()
     if args.run:
         run_onnx()
+    run_torch()
