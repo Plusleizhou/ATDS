@@ -18,7 +18,7 @@ np.random.seed(SEED)
 torch.manual_seed(SEED)
 
 
-def get_dummy_input():
+def get_dummy_input(args):
     def get_interaction_indexes(agt_ctrs, ctx_ctrs, dist_th):
         dist = agt_ctrs.view(-1, 1, 2) - ctx_ctrs.view(1, -1, 2)
         l2_dist = torch.sqrt((dist ** 2).sum(2))
@@ -49,14 +49,16 @@ def get_dummy_input():
                                 shuffle=False,
                                 collate_fn=collate_fn)
     val_dataloader = val_dataloader.__iter__()
-    for i in range(0):
+    for i in range(100000):
         batch = val_dataloader.next()
-    batch = val_dataloader.next()
+        if batch["graph"][0]["ctrs"].shape[0] <= 300:
+            break
+    # batch = val_dataloader.next()
     dummy_input = list()
 
     # max num of nodes
-    agents_num = 32
-    nodes_num = 1000
+    agents_num = args.agents
+    nodes_num = args.lane_nodes
 
     # agents
     agents_pad = torch.zeros(agents_num, 9, 20)
@@ -139,12 +141,12 @@ def load_model():
     return model
 
 
-def convert():
+def convert(args):
     model = load_model()
     input_names = ["agents", "nodes", "map_indexes", "a2m", "m2a", "a2a"]
     output_names = ["reg", "key_points"]
 
-    torch.onnx.export(model, get_dummy_input(), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
+    torch.onnx.export(model, get_dummy_input(args), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
                       output_names=output_names)
 
 
@@ -163,10 +165,10 @@ def simplify_onnx():
     onnx.save(model_simp, 'simple_atdsnet.onnx')
 
 
-def run_torch(multi=False):
+def run_torch(args, multi=False):
     model = load_model()
 
-    dummy_input = get_dummy_input()
+    dummy_input = get_dummy_input(args)
 
     if multi:
         start_time = time.time()
@@ -181,7 +183,7 @@ def run_torch(multi=False):
     return out
 
 
-def run_onnx():
+def run_onnx(args):
     ort_session = onnxruntime.InferenceSession("atdsnet.onnx", providers=['TensorrtExecutionProvider',
                                                                                  'CUDAExecutionProvider',
                                                                                  'CPUExecutionProvider'])
@@ -197,7 +199,7 @@ def run_onnx():
             data = data.detach().cpu().numpy()
         return data
 
-    dummy_input = to_numpy(get_dummy_input())
+    dummy_input = to_numpy(get_dummy_input(args))
     inputs = {
         "agents": dummy_input[0],
         "nodes": dummy_input[1],
@@ -215,7 +217,7 @@ def run_onnx():
     print(ort_outs[1][0, 0, 0])
 
     print("torch model results".center(50, "-"))
-    torch_out = run_torch(multi=True)
+    torch_out = run_torch(args, multi=True)
     np.testing.assert_allclose(to_numpy(torch_out["key_points"]), ort_outs[1], rtol=1e-03, atol=1e-05)
 
 
@@ -226,15 +228,24 @@ def get_args():
     parser.add_argument("--simplify", action="store_true", default=False,
                         help="whether the simplify the onnx model")
     parser.add_argument("--run", action="store_true", default=False, help="whether to use the model")
+    parser.add_argument("--run_torch", action="store_true", default=False, help="run torch model only")
+    parser.add_argument("--agents", type=int, default=16, help="the maximin num of agents")
+    parser.add_argument("--lane_nodes", type=int, default=500, help="the maximin num of lane nodes")
     return parser.parse_args()
 
 
-if __name__ == "__main__":
-    args = get_args()
+def main(args):
     if args.to_onnx:
-        convert()
+        convert(args)
     if args.simplify:
         assert "atdsnet.onnx" in os.listdir(os.getcwd()), "convert the pytorch model to onnx model first"
         simplify_onnx()
     if args.run:
-        run_onnx()
+        run_onnx(args)
+    if args.run_torch:
+        run_torch(args)
+
+
+if __name__ == "__main__":
+    main(get_args())
+
