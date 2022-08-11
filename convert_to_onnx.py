@@ -163,15 +163,21 @@ def simplify_onnx():
     onnx.save(model_simp, 'simple_atdsnet.onnx')
 
 
-def run_torch():
+def run_torch(multi=False):
     model = load_model()
 
     dummy_input = get_dummy_input()
 
+    if multi:
+        start_time = time.time()
+        for i in range(100):
+            _ = model(*dummy_input)
+        print(f"Average time for inference once: {round((time.time() - start_time) * 10, 3)} ms")
+
     out = model(*dummy_input)
     # print(model)
     print(f"reg: {out['reg'].shape}, key_points: {out['key_points'].shape}")
-    print(out['key_points'][0, 0, 0])
+    print(out['key_points'][0, 0, 0].detach().cpu().numpy())
     return out
 
 
@@ -200,16 +206,16 @@ def run_onnx():
         "m2a": dummy_input[4],
         "a2a": dummy_input[5],
     }
+    print("onnx model results".center(50, "-"))
     start_time = time.time()
     for i in range(100):
         ort_outs = ort_session.run(None, inputs)
-    print("onnx model results".center(50, "-"))
     print(f"Average time for inference once: {round((time.time() - start_time) * 10, 3)} ms")
     print([x.shape for x in ort_outs])
     print(ort_outs[1][0, 0, 0])
 
     print("torch model results".center(50, "-"))
-    torch_out = run_torch()
+    torch_out = run_torch(multi=True)
     np.testing.assert_allclose(to_numpy(torch_out["key_points"]), ort_outs[1], rtol=1e-03, atol=1e-05)
 
 
