@@ -21,9 +21,9 @@ torch.manual_seed(SEED)
 def get_dummy_input():
     def get_interaction_indexes(agt_ctrs, ctx_ctrs, dist_th):
         dist = agt_ctrs.view(-1, 1, 2) - ctx_ctrs.view(1, -1, 2)
-        dist = torch.sqrt((dist ** 2).sum(2))
-        roi = dist <= dist_th
-        return torch.nonzero(roi, as_tuple=False)
+        l2_dist = torch.sqrt((dist ** 2).sum(2))
+        roi = l2_dist <= dist_th
+        return torch.cat([roi.unsqueeze(2), dist], dim=2)
 
     def agent_gather(trajs_obs, pad_obs):
         feats = torch.zeros_like(trajs_obs[:, :, :2])
@@ -81,7 +81,6 @@ def get_dummy_input():
     nodes_pad[:nodes.shape[0]] = nodes
     dummy_input.append(nodes_pad)
 
-    # map_indexes = torch.arange(nodes_pad.shape[0], dtype=torch.int64).unsqueeze(1).repeat(1, 28)
     map_indexes = torch.ones(nodes_pad.shape[0], 28, dtype=torch.int64) * (nodes_num - 1)
     for i in range(len(graph["pre"])):
         map_indexes[:graph["pre"][i]["u"].shape[0], 2 * i] = graph["pre"][i]["u"].type(torch.int64)
@@ -98,19 +97,20 @@ def get_dummy_input():
     map_indexes[:graph["left"]["v"].shape[0], 27] = graph["left"]["v"].type(torch.int64)
     dummy_input.append(map_indexes)
 
-    action_indexes = torch.ones(nodes_pad.shape[0], 6, dtype=torch.int64)
-    # action_indexes[:, [0, 3]] = torch.arange(nodes_pad.shape[0], dtype=torch.int64).unsqueeze(1).repeat(1, 2)
-    action_indexes[:, [0, 3]] *= (nodes_num - 1)
-    action_indexes[:, [1, 2, 4, 5]] *= (agents_num - 1)
     agent_ctrs = batch["trajs_obs"][0][:, -1, :2]
     node_ctrs = graph["ctrs"][:, :2]
-    ids = get_interaction_indexes(node_ctrs, agent_ctrs, config["agent2map_dist"])
-    action_indexes[:ids.shape[0], :2] = ids
-    ids = get_interaction_indexes(agent_ctrs, node_ctrs, config["map2agent_dist"])
-    action_indexes[:ids.shape[0], 2:4] = ids
-    ids = get_interaction_indexes(agent_ctrs, agent_ctrs, config["agent2agent_dist"])
-    action_indexes[:ids.shape[0], 4:] = ids
-    dummy_input.append(action_indexes)
+    a2m_pad = torch.zeros(nodes_num, agents_num, 3, dtype=torch.float32)
+    m2a_pad = torch.zeros(agents_num, nodes_num, 3, dtype=torch.float32)
+    a2a_pad = torch.zeros(agents_num, agents_num, 3, dtype=torch.float32)
+    a2m = get_interaction_indexes(node_ctrs, agent_ctrs, config["agent2map_dist"])
+    a2m_pad[:a2m.shape[0], :a2m.shape[1]] = a2m
+    dummy_input.append(a2m_pad)
+    m2a = get_interaction_indexes(agent_ctrs, node_ctrs, config["map2agent_dist"])
+    m2a_pad[:m2a.shape[0], :m2a.shape[1]] = m2a
+    dummy_input.append(m2a_pad)
+    a2a = get_interaction_indexes(agent_ctrs, agent_ctrs, config["agent2agent_dist"])
+    a2a_pad[:a2a.shape[0], :a2a.shape[1]] = a2a
+    dummy_input.append(a2a_pad)
 
     dummy_input = gpu(dummy_input)
     return tuple(dummy_input)
@@ -141,7 +141,7 @@ def load_model():
 
 def convert():
     model = load_model()
-    input_names = ["agents", "nodes", "map_indexes", "action_indexes"]
+    input_names = ["agents", "nodes", "map_indexes", "a2m", "m2a", "a2a"]
     output_names = ["reg", "key_points"]
 
     torch.onnx.export(model, get_dummy_input(), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
@@ -196,7 +196,9 @@ def run_onnx():
         "agents": dummy_input[0],
         "nodes": dummy_input[1],
         "map_indexes": dummy_input[2],
-        "action_indexes": dummy_input[3],
+        "a2m": dummy_input[3],
+        "m2a": dummy_input[4],
+        "a2a": dummy_input[5],
     }
     start_time = time.time()
     for i in range(100):
@@ -230,4 +232,3 @@ if __name__ == "__main__":
         simplify_onnx()
     if args.run:
         run_onnx()
-    run_torch()

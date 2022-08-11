@@ -22,7 +22,7 @@ class Net(nn.Module):
 
         self.pyramid_decoder = PyramidDecoder(config)
 
-    def forward(self, agents, nodes, map_indexes, action_indexes):
+    def forward(self, agents, nodes, map_indexes, a2m, m2a, a2a):
         # extract useful info
         agents = agents
         nodes = nodes
@@ -35,9 +35,9 @@ class Net(nn.Module):
         nodes, node_ctrs = self.map_encoder(nodes, map_indexes)
 
         # interactions
-        nodes = self.a2m(nodes, node_ctrs, agents, agent_ctrs, action_indexes[:, :2])
-        agents = self.m2a(agents, agent_ctrs, nodes, node_ctrs, action_indexes[:, 2:4])
-        agents = self.a2a(agents, agent_ctrs, action_indexes[:, 4:6])
+        nodes = self.a2m(nodes, agents, a2m)
+        agents = self.m2a(agents, nodes, m2a)
+        agents = self.a2a(agents, a2a)
 
         # prediction
         out = self.pyramid_decoder(agents, agent_ctrs)

@@ -15,13 +15,11 @@ class A2M(nn.Module):
             att.append(Att(n_map, config["n_agent"]))
         self.att = nn.ModuleList(att)
 
-    def forward(self, feat, ctrs, agents, agent_ctrs, a2m):
+    def forward(self, feat, agents, a2m):
         for i in range(len(self.att)):
             feat = self.att[i](
                 feat,
-                ctrs,
                 agents,
-                agent_ctrs,
                 a2m,
             )
         return feat
@@ -40,13 +38,11 @@ class M2A(nn.Module):
             att.append(Att(n_agent, n_map))
         self.att = nn.ModuleList(att)
 
-    def forward(self, agents, agent_ctrs, nodes, node_ctrs, m2a):
+    def forward(self, agents, nodes, m2a):
         for i in range(len(self.att)):
             agents = self.att[i](
                 agents,
-                agent_ctrs,
                 nodes,
-                node_ctrs,
                 m2a,
             )
         return agents
@@ -64,13 +60,11 @@ class A2A(nn.Module):
             att.append(Att(n_agent, n_agent))
         self.att = nn.ModuleList(att)
 
-    def forward(self, agents, agent_ctrs, a2a):
+    def forward(self, agents, a2a):
         for i in range(len(self.att)):
             agents = self.att[i](
                 agents,
-                agent_ctrs,
                 agents,
-                agent_ctrs,
                 a2a,
             )
         return agents
@@ -84,9 +78,9 @@ class Att(nn.Module):
         self.scale = n_ctx ** -0.5
 
         self.dist = nn.Sequential(
-            nn.Linear(2, n_ctx),
+            nn.Linear(2, 2),
             nn.ReLU(inplace=True),
-            Linear(n_ctx, n_ctx, ng=ng),
+            Linear(2, 1, ng=ng, act=False),
         )
 
         self.to_q = Linear(n_agt, self.n_heads * n_ctx, ng=ng, act=False)
@@ -104,32 +98,31 @@ class Att(nn.Module):
             nn.Linear(n_agt, n_agt, bias=False),
         )
 
-    def forward(self, agts, agt_ctrs, ctx, ctx_ctrs, x2x):
+    def forward(self, agts, ctx, x2x):
         res = agts
 
-        hi = x2x[:, 0]
-        wi = x2x[:, 1]
+        mask = x2x[:, :, 0]
 
-        dist = agt_ctrs[hi] - ctx_ctrs[wi]
+        dist = x2x[:, :, 1:].reshape(-1, 2)
         dist = self.dist(dist)
+        dist = dist.reshape(mask.shape[0], mask.shape[1], -1)
 
-        q = self.relu(self.to_q(agts[hi] + dist))
-        k = self.relu(self.to_k(ctx[wi] + dist))
-        v = self.to_v(ctx[wi])
+        q = self.relu(self.to_q(agts))
+        k = self.relu(self.to_k(ctx))
+        v = self.to_v(ctx)
 
-        query, key, value = map(lambda t: rearrange(t, "n (h d) -> n h d", h=self.n_heads).unsqueeze(-2), [q, k, v])
+        query, key, value = map(lambda t: rearrange(t, "n (h d) -> h n d", h=self.n_heads), [q, k, v])
 
         gates = torch.matmul(query, key.transpose(-1, -2)) * self.scale
-        gates = self.sigmoid(gates)
+        gates = gates + dist[..., 0]
+        gates = self.sigmoid(gates) * mask
 
-        out = torch.matmul(gates, value).squeeze(-2)
-        out = rearrange(out, "n h d -> n (h d)")
+        out = torch.matmul(gates, value)
+        out = rearrange(out, "h n d -> n (h d)")
         out = self.to_out(out)
 
         agts = self.agt(agts)
-        agts.index_add_(0, hi, out)
-        # agts.scatter_add_(0, hi.unsqueeze(1).repeat(1, 128), out)
-        # agts = index_add_naive(agts, out, hi)
+        agts += out
         agts = self.norm(agts)
         agts = self.relu(agts)
 
