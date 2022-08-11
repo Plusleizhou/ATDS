@@ -91,9 +91,9 @@ class Att(nn.Module):
         self.scale = n_ctx ** -0.5
 
         self.dist = nn.Sequential(
-            nn.Linear(2, n_ctx),
+            nn.Linear(2, 2),
             nn.ReLU(inplace=True),
-            Linear(n_ctx, n_ctx, ng=ng),
+            Linear(2, 1, ng=ng, act=False),
         )
 
         self.to_q = Linear(n_agt, self.n_heads * n_ctx, ng=ng, act=False)
@@ -145,13 +145,13 @@ class Att(nn.Module):
         dist = agt_ctrs[hi] - ctx_ctrs[wi]
         dist = self.dist(dist)
 
-        q = self.relu(self.to_q(agts[hi] + dist))
-        k = self.relu(self.to_k(ctx[wi] + dist))
+        q = self.relu(self.to_q(agts[hi]))
+        k = self.relu(self.to_k(ctx[wi]))
         v = self.to_v(ctx[wi])
 
         query, key, value = map(lambda t: rearrange(t, "n (h d) -> n h d", h=self.n_heads).unsqueeze(-2), [q, k, v])
 
-        gates = torch.matmul(query, key.transpose(-1, -2)) * self.scale
+        gates = torch.matmul(query, key.transpose(-1, -2)) * self.scale + dist.reshape(-1, 1, 1, 1)
         gates = self.sigmoid(gates)
 
         out = torch.matmul(gates, value).squeeze(-2)
