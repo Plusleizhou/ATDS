@@ -229,7 +229,7 @@ def visualization(out, data, num, save, show):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(y_min, y_max)
 
-    base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids = pred_metrics(
+    base_ade1, base_fde1, ade1, fde1, ade, fde, min_ids, _ = pred_metrics(
         preds, pred_trajs, gt_preds, pad_fut, config["num_preds"])
     ax.text(center[0] + width / 2, center[1] - width / 2,
             "b_ade1:{:.3f}\nb_fde1:{:.3f}\nade1: {:.3f}\nfde1: {:.3f}\nade6: {:.3f}\nfde6: {:.3f}".

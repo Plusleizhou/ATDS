@@ -240,7 +240,11 @@ def save_log(epoch, out, divided=False):
     f = open(config["result"], 'a')
     f.write(str('%.3f' % epoch) + '\t')
     for k, value in out.items():
-        f.write(str('%.3f' % value) + '\t')
+        if isinstance(value, list):
+            for v in value:
+                f.write(str('%.3f' % v) + '\t')
+        else:
+            f.write(str('%.3f' % value) + '\t')
     f.write("\n")
     if divided:
         f.write("----------------------------------------------------------------------\n")
