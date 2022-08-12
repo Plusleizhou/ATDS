@@ -77,11 +77,7 @@ class Att(nn.Module):
         self.n_heads = 6
         self.scale = n_ctx ** -0.5
 
-        self.dist = nn.Sequential(
-            nn.Linear(2, 2),
-            nn.ReLU(inplace=True),
-            Linear(2, 1, ng=ng, act=False),
-        )
+        self.dist = nn.Linear(2, 1)
 
         self.to_q = Linear(n_agt, self.n_heads * n_ctx, ng=ng, act=False)
         self.to_k = Linear(n_agt, self.n_heads * n_ctx, ng=ng, act=False)
@@ -103,9 +99,7 @@ class Att(nn.Module):
 
         mask = x2x[:, :, 0]
 
-        dist = x2x[:, :, 1:].reshape(-1, 2)
-        dist = self.dist(dist)
-        dist = dist.reshape(mask.shape[0], mask.shape[1], -1)
+        dist = self.dist(x2x[:, :, 1:])
 
         q = self.relu(self.to_q(agts))
         k = self.relu(self.to_k(ctx))

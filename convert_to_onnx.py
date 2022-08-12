@@ -19,6 +19,35 @@ torch.manual_seed(SEED)
 
 
 def get_dummy_input(args):
+    dummy_input = list()
+
+    # max num of nodes
+    agents_num = args.agents
+    nodes_num = args.lane_nodes
+
+    # agents
+    agents_pad = torch.ones(agents_num, 9, 20)
+    dummy_input.append(agents_pad)
+
+    # hd_maps
+    nodes_pad = torch.ones(nodes_num, 8)
+    dummy_input.append(nodes_pad)
+
+    map_indexes = torch.arange(nodes_pad.shape[0]).unsqueeze(1).repeat(1, 28)
+    dummy_input.append(map_indexes)
+
+    a2m_pad = torch.ones(nodes_num, agents_num, 3, dtype=torch.float32)
+    m2a_pad = torch.ones(agents_num, nodes_num, 3, dtype=torch.float32)
+    a2a_pad = torch.ones(agents_num, agents_num, 3, dtype=torch.float32)
+    dummy_input.append(a2m_pad)
+    dummy_input.append(m2a_pad)
+    dummy_input.append(a2a_pad)
+
+    dummy_input = gpu(dummy_input)
+    return tuple(dummy_input)
+
+
+def load_input(args):
     def get_interaction_indexes(agt_ctrs, ctx_ctrs, dist_th):
         dist = agt_ctrs.view(-1, 1, 2) - ctx_ctrs.view(1, -1, 2)
         l2_dist = torch.sqrt((dist ** 2).sum(2))
