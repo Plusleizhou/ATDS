@@ -14,29 +14,29 @@ class Net(nn.Module):
         self.config = config
 
         self.agent_encoder = AgentEncoder(config)
-        self.map_encoder = MapEncoder(config)
-
-        self.a2m = A2M(config)
-        self.m2a = M2A(config)
+        # self.map_encoder = MapEncoder(config)
+        #
+        # self.a2m = A2M(config)
+        # self.m2a = M2A(config)
         self.a2a = A2A(config)
 
         self.pyramid_decoder = PyramidDecoder(config)
 
     def forward(self, agents, nodes, map_indexes, a2m, m2a, a2a):
         # extract useful info
-        agents = agents
-        nodes = nodes
+        # agents = agents
+        # nodes = nodes
         # construct agent feature
         agent_ctrs = agents[:, 6:8, 19]
         agents, d_agent_ctrs = self.agent_encoder(agents[:, :6], agents[:, 6:])
         agent_ctrs = get_agent_ctrs(d_agent_ctrs, agent_ctrs)
 
-        # construct map features
-        nodes, node_ctrs = self.map_encoder(nodes, map_indexes)
-
-        # interactions
-        nodes = self.a2m(nodes, agents, a2m)
-        agents = self.m2a(agents, nodes, m2a)
+        # # construct map features
+        # nodes, node_ctrs = self.map_encoder(nodes, map_indexes)
+        #
+        # # interactions
+        # nodes = self.a2m(nodes, agents, a2m)
+        # agents = self.m2a(agents, nodes, m2a)
         agents = self.a2a(agents, a2a)
 
         # prediction

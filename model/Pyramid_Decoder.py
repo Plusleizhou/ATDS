@@ -74,16 +74,11 @@ class PyramidDecoder(nn.Module):
     def forward(self, agents, agent_ctrs):
         preds = self.pred[0](agents)
         reg = preds[-1]
-        key_points = torch.cat([preds[0], preds[1]], dim=-2)
 
         ctrs = agent_ctrs.view(-1, 1, 1, 2)
-        reg = reg + ctrs
-        key_points = key_points + ctrs
+        reg = (reg + ctrs).squeeze(1)
 
-        out = dict()
-        out['reg'] = reg
-        out['key_points'] = key_points
-        return out
+        return reg
 
 
 class Generator(nn.Module):

@@ -173,10 +173,10 @@ def load_model():
 def convert(args):
     model = load_model()
     input_names = ["agents", "nodes", "map_indexes", "a2m", "m2a", "a2a"]
-    output_names = ["reg", "key_points"]
+    output_names = ["reg"]
 
-    torch.onnx.export(model, get_dummy_input(args), "atdsnet.onnx", verbose=True, opset_version=11, input_names=input_names,
-                      output_names=output_names)
+    torch.onnx.export(model, get_dummy_input(args), "atdsnet.onnx", verbose=True, opset_version=11,
+                      input_names=input_names, output_names=output_names)
 
 
 def simplify_onnx():
@@ -207,14 +207,13 @@ def run_torch(args, multi=False):
 
     out = model(*dummy_input)
     # print(model)
-    print(f"reg: {out['reg'].shape}, key_points: {out['key_points'].shape}")
-    print(out['key_points'][0, 0, 0].detach().cpu().numpy())
+    print(f"reg: {out.shape}")
+    print(out[0, 0].detach().cpu().numpy())
     return out
 
 
 def run_onnx(args):
-    ort_session = onnxruntime.InferenceSession("atdsnet.onnx", providers=['TensorrtExecutionProvider',
-                                                                                 'CUDAExecutionProvider',
+    ort_session = onnxruntime.InferenceSession("atdsnet.onnx", providers=['CUDAExecutionProvider',
                                                                                  'CPUExecutionProvider'])
 
     # compute ONNX Runtime output prediction
@@ -231,10 +230,10 @@ def run_onnx(args):
     dummy_input = to_numpy(get_dummy_input(args))
     inputs = {
         "agents": dummy_input[0],
-        "nodes": dummy_input[1],
-        "map_indexes": dummy_input[2],
-        "a2m": dummy_input[3],
-        "m2a": dummy_input[4],
+        # "nodes": dummy_input[1],
+        # "map_indexes": dummy_input[2],
+        # "a2m": dummy_input[3],
+        # "m2a": dummy_input[4],
         "a2a": dummy_input[5],
     }
     print("onnx model results".center(50, "-"))
@@ -242,12 +241,12 @@ def run_onnx(args):
     for i in range(100):
         ort_outs = ort_session.run(None, inputs)
     print(f"Average time for inference once: {round((time.time() - start_time) * 10, 3)} ms")
-    print([x.shape for x in ort_outs])
-    print(ort_outs[1][0, 0, 0])
+    print(ort_outs[0].shape)
+    print(ort_outs[0][0, 0])
 
     print("torch model results".center(50, "-"))
     torch_out = run_torch(args, multi=True)
-    np.testing.assert_allclose(to_numpy(torch_out["key_points"]), ort_outs[1], rtol=1e-03, atol=1e-05)
+    np.testing.assert_allclose(to_numpy(torch_out), ort_outs[0], rtol=1e-03, atol=1e-05)
 
 
 def get_args():
