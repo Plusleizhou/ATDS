@@ -19,32 +19,12 @@ torch.manual_seed(SEED)
 
 
 def get_dummy_input(args):
-    dummy_input = list()
-
     # max num of nodes
     agents_num = args.agents
-    nodes_num = args.lane_nodes
 
     # agents
-    agents_pad = torch.ones(agents_num, 9, 20)
-    dummy_input.append(agents_pad)
-
-    # hd_maps
-    nodes_pad = torch.ones(nodes_num, 8)
-    dummy_input.append(nodes_pad)
-
-    map_indexes = torch.arange(nodes_pad.shape[0]).unsqueeze(1).repeat(1, 28)
-    dummy_input.append(map_indexes)
-
-    a2m_pad = torch.ones(nodes_num, agents_num, 3, dtype=torch.float32)
-    m2a_pad = torch.ones(agents_num, nodes_num, 3, dtype=torch.float32)
-    a2a_pad = torch.ones(agents_num, agents_num, 3, dtype=torch.float32)
-    dummy_input.append(a2m_pad)
-    dummy_input.append(m2a_pad)
-    dummy_input.append(a2a_pad)
-
-    dummy_input = gpu(dummy_input)
-    return tuple(dummy_input)
+    dummy_input = torch.ones(agents_num, 20 * 9 + agents_num * 3)
+    return dummy_input
 
 
 def load_input(args):
@@ -78,73 +58,25 @@ def load_input(args):
                                 shuffle=False,
                                 collate_fn=collate_fn)
     val_dataloader = val_dataloader.__iter__()
-    for i in range(100000):
-        batch = val_dataloader.next()
-        if batch["graph"][0]["ctrs"].shape[0] <= 300:
-            break
-    # batch = val_dataloader.next()
-    dummy_input = list()
+    for i in range(100):
+        val_dataloader.next()
+    batch = val_dataloader.next()
 
     # max num of nodes
     agents_num = args.agents
-    nodes_num = args.lane_nodes
 
     # agents
-    agents_pad = torch.zeros(agents_num, 9, 20)
-    agents = agent_gather(batch["trajs_obs"][0], batch["pad_obs"][0])
+    agents_pad = torch.zeros(agents_num, 20, 9)
+    agents = agent_gather(batch["trajs_obs"][0], batch["pad_obs"][0]).transpose(1, 2)
     agents_pad[:agents.shape[0]] = agents
-    dummy_input.append(agents_pad)
-
-    # hd_maps
-    graph = batch["graph"][0]
-
-    nodes_pad = torch.zeros(nodes_num, 8)
-    nodes = torch.cat(
-            (
-                graph["ctrs"],
-                graph["feats"],
-                graph["turn"],
-                graph["control"].unsqueeze(1),
-                graph["intersect"].unsqueeze(1),
-            ),
-            1,
-    )
-    nodes_pad[:nodes.shape[0]] = nodes
-    dummy_input.append(nodes_pad)
-
-    map_indexes = torch.ones(nodes_pad.shape[0], 28, dtype=torch.int64) * (nodes_num - 1)
-    for i in range(len(graph["pre"])):
-        map_indexes[:graph["pre"][i]["u"].shape[0], 2 * i] = graph["pre"][i]["u"].type(torch.int64)
-        map_indexes[:graph["pre"][i]["v"].shape[0], 2 * i + 1] = graph["pre"][i]["v"].type(torch.int64)
-
-    map_indexes[:graph["right"]["u"].shape[0], 12] = graph["right"]["u"].type(torch.int64)
-    map_indexes[:graph["right"]["v"].shape[0], 13] = graph["right"]["v"].type(torch.int64)
-
-    for i in range(len(graph["suc"])):
-        map_indexes[:graph["suc"][i]["u"].shape[0], 14 + 2 * i] = graph["suc"][i]["u"].type(torch.int64)
-        map_indexes[:graph["suc"][i]["v"].shape[0], 15 + 2 * i] = graph["suc"][i]["v"].type(torch.int64)
-
-    map_indexes[:graph["left"]["u"].shape[0], 26] = graph["left"]["u"].type(torch.int64)
-    map_indexes[:graph["left"]["v"].shape[0], 27] = graph["left"]["v"].type(torch.int64)
-    dummy_input.append(map_indexes)
 
     agent_ctrs = batch["trajs_obs"][0][:, -1, :2]
-    node_ctrs = graph["ctrs"][:, :2]
-    a2m_pad = torch.zeros(nodes_num, agents_num, 3, dtype=torch.float32)
-    m2a_pad = torch.zeros(agents_num, nodes_num, 3, dtype=torch.float32)
     a2a_pad = torch.zeros(agents_num, agents_num, 3, dtype=torch.float32)
-    a2m = get_interaction_indexes(node_ctrs, agent_ctrs, config["agent2map_dist"])
-    a2m_pad[:a2m.shape[0], :a2m.shape[1]] = a2m
-    dummy_input.append(a2m_pad)
-    m2a = get_interaction_indexes(agent_ctrs, node_ctrs, config["map2agent_dist"])
-    m2a_pad[:m2a.shape[0], :m2a.shape[1]] = m2a
-    dummy_input.append(m2a_pad)
     a2a = get_interaction_indexes(agent_ctrs, agent_ctrs, config["agent2agent_dist"])
     a2a_pad[:a2a.shape[0], :a2a.shape[1]] = a2a
-    dummy_input.append(a2a_pad)
 
-    dummy_input = gpu(dummy_input)
-    return tuple(dummy_input)
+    dummy_input = torch.cat([agents_pad.view(agents_num, -1), a2a_pad.view(agents_num, -1)], dim=-1)
+    return gpu(dummy_input)
 
 
 def load_checkpoint(path, net):
@@ -172,10 +104,10 @@ def load_model():
 
 def convert(args):
     model = load_model()
-    input_names = ["agents", "nodes", "map_indexes", "a2m", "m2a", "a2a"]
-    output_names = ["reg"]
+    input_names = ["input"]
+    output_names = ["output"]
 
-    torch.onnx.export(model, get_dummy_input(args), "atdsnet.onnx", verbose=True, opset_version=11,
+    torch.onnx.export(model, load_input(args), "atdsnet.onnx", verbose=True, opset_version=11,
                       input_names=input_names, output_names=output_names)
 
 
@@ -197,18 +129,18 @@ def simplify_onnx():
 def run_torch(args, multi=False):
     model = load_model()
 
-    dummy_input = get_dummy_input(args)
+    dummy_input = load_input(args)
 
     if multi:
         start_time = time.time()
         for i in range(100):
-            _ = model(*dummy_input)
+            _ = model(dummy_input)
         print(f"Average time for inference once: {round((time.time() - start_time) * 10, 3)} ms")
 
-    out = model(*dummy_input)
+    out = model(dummy_input)
     # print(model)
     print(f"reg: {out.shape}")
-    print(out[0, 0].detach().cpu().numpy())
+    print(out[0, 10:].detach().cpu().numpy())
     return out
 
 
@@ -227,14 +159,9 @@ def run_onnx(args):
             data = data.detach().cpu().numpy()
         return data
 
-    dummy_input = to_numpy(get_dummy_input(args))
+    dummy_input = to_numpy(load_input(args))
     inputs = {
-        "agents": dummy_input[0],
-        # "nodes": dummy_input[1],
-        # "map_indexes": dummy_input[2],
-        # "a2m": dummy_input[3],
-        # "m2a": dummy_input[4],
-        "a2a": dummy_input[5],
+        "input": dummy_input,
     }
     print("onnx model results".center(50, "-"))
     start_time = time.time()
@@ -242,7 +169,7 @@ def run_onnx(args):
         ort_outs = ort_session.run(None, inputs)
     print(f"Average time for inference once: {round((time.time() - start_time) * 10, 3)} ms")
     print(ort_outs[0].shape)
-    print(ort_outs[0][0, 0])
+    print(ort_outs[0][0, 10:])
 
     print("torch model results".center(50, "-"))
     torch_out = run_torch(args, multi=True)
